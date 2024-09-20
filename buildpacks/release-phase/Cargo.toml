@@ -1,0 +1,17 @@
+[package]
+name = "release-phase"
+rust-version.workspace = true
+edition.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+libcnb = "0.22.0"
+commons_ruby = { git = "https://github.com/heroku/buildpacks-ruby", branch = "main", package = "commons" }
+libherokubuildpack = { version = "=0.22.0", default-features = false, features = ["fs", "log"] }
+indoc = "2"
+
+[dev-dependencies]
+libcnb-test = "=0.22.0"
+test_support.workspace = true

@@ -1,0 +1,10 @@
+.idea
+dist/
+node_modules/
+.tool-versions
+
+packaged/
+**/target/
+*.cnb
+
+.DS_Store

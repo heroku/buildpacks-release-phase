@@ -1,0 +1,21 @@
+api = "0.10"
+
+[buildpack]
+id = "heroku/release-phase"
+version = "0.1.0"
+name = "Heroku Release Phase"
+description = "Enhances Release Phase with support for multiple, ordered release commands and release-build command."
+
+[[buildpack.licenses]]
+type = "MIT"
+
+[[metadata.targets]]
+os = "linux"
+arch = "amd64"
+
+[[metadata.targets]]
+os = "linux"
+arch = "arm64"
+
+[metadata.release]
+image = { repository = "docker.io/heroku/buildpack-release-phase" }

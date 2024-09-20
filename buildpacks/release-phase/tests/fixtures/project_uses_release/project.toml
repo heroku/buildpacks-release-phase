@@ -1,0 +1,9 @@
+[_]
+schema-version = "0.2"
+
+[[io.buildpacks.group]]
+uri = "heroku/release-phase"
+
+[[com.heroku.phase.release]]
+command = ["bash"]
+args = ["-c", "echo 'Hello from Release Phase Buildpack!'"]
