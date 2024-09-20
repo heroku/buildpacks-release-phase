@@ -22,7 +22,7 @@ cargo test -- --include-ignored
 
 ### Releasing A New Version
 
-[Action workflows](https://github.com/heroku/buildpacks-frontend-web/actions) are used to automate the release process:
+[Action workflows](https://github.com/heroku/buildpacks-release-phase/actions) are used to automate the release process:
 
 1. Run **Prepare Buildpack Releases**.
 1. Await completion of the preparation step.
