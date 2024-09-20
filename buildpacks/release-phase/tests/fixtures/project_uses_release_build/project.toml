@@ -4,6 +4,6 @@ schema-version = "0.2"
 [[io.buildpacks.group]]
 uri = "heroku/release-phase"
 
-[[com.heroku.phase.release-build]]
+[com.heroku.phase.release-build]
 command = ["bash"]
 args = ["-c", "echo 'Build in Release Phase Buildpack!'"]

@@ -10,11 +10,11 @@ pub fn read_project_config(dir: &Path) -> Result<Option<toml::Value>, TomlFileEr
     } else {
         toml::Table::new().into()
     };
-    let mut release_phase_toml = toml::Table::new();
+    let mut release_commands = toml::Table::new();
     if let Some(release_config) =
         toml_select_value(vec!["com", "heroku", "phase", "release"], &project_toml).cloned()
     {
-        release_phase_toml.insert("release".to_string(), release_config);
+        release_commands.insert("release".to_string(), release_config);
     };
     if let Some(release_build_config) = toml_select_value(
         vec!["com", "heroku", "phase", "release-build"],
@@ -22,12 +22,35 @@ pub fn read_project_config(dir: &Path) -> Result<Option<toml::Value>, TomlFileEr
     )
     .cloned()
     {
-        release_phase_toml.insert("release-build".to_string(), release_build_config);
+        release_commands.insert("release-build".to_string(), release_build_config);
     };
-    if release_phase_toml.is_empty() {
+    if release_commands.is_empty() {
         Ok(None)
     } else {
-        Ok(Some(release_phase_toml.into()))
+        Ok(Some(release_commands.into()))
+    }
+}
+
+pub fn read_commands_config(dir: &Path) -> Result<Option<toml::Value>, TomlFileError> {
+    let commands_toml_path = dir.join("release-commands.toml");
+    let commands_toml = if commands_toml_path.is_file() {
+        read_toml_file::<toml::Value>(commands_toml_path)?
+    } else {
+        toml::Table::new().into()
+    };
+    let mut release_commands = toml::Table::new();
+    if let Some(release_config) = toml_select_value(vec!["release"], &commands_toml).cloned() {
+        release_commands.insert("release".to_string(), release_config);
+    };
+    if let Some(release_build_config) =
+        toml_select_value(vec!["release-build"], &commands_toml).cloned()
+    {
+        release_commands.insert("release-build".to_string(), release_build_config);
+    };
+    if release_commands.is_empty() {
+        Ok(None)
+    } else {
+        Ok(Some(release_commands.into()))
     }
 }
 
@@ -38,6 +61,7 @@ mod tests {
     use libherokubuildpack::toml::toml_select_value;
     use toml::toml;
 
+    use crate::read_commands_config;
     use crate::read_project_config;
 
     #[test]
@@ -79,7 +103,7 @@ mod tests {
         .unwrap()
         .expect("TOML value");
         let expected_toml: toml::Value = toml! {
-            [[release-build]]
+            [release-build]
             command = ["bash"]
             args = ["-c", "echo 'Build in Release Phase Buildpack!'"]
         }
@@ -99,5 +123,58 @@ mod tests {
         )
         .unwrap();
         assert_eq!(project_config, None);
+    }
+
+    #[test]
+    fn reads_commands_toml_for_release_commands() {
+        let commands_config =
+            read_commands_config(PathBuf::from("tests/fixtures/uses_release").as_path())
+                .unwrap()
+                .expect("TOML value");
+        let expected_toml: toml::Value = toml! {
+            [[release]]
+            command = ["bash"]
+            args = ["-c", "echo 'Release in release-commands.toml'"]
+
+            [[release]]
+            command = ["bash"]
+            args = ["-c", "echo 'Another release command in release-commands.toml'"]
+        }
+        .into();
+        assert_eq!(
+            toml_select_value(vec!["release"], &commands_config),
+            expected_toml.get("release")
+        );
+        assert_eq!(
+            toml_select_value(vec!["release-build"], &commands_config),
+            None
+        );
+    }
+
+    #[test]
+    fn reads_commands_toml_for_release_build_command() {
+        let commands_config =
+            read_commands_config(PathBuf::from("tests/fixtures/uses_release_build").as_path())
+                .unwrap()
+                .expect("TOML value");
+        let expected_toml: toml::Value = toml! {
+            [release-build]
+            command = ["bash"]
+            args = ["-c", "echo 'Release Build in release-commands.toml'"]
+        }
+        .into();
+        assert_eq!(
+            toml_select_value(vec!["release-build"], &commands_config),
+            expected_toml.get("release-build")
+        );
+        assert_eq!(toml_select_value(vec!["release"], &commands_config), None);
+    }
+
+    #[test]
+    fn no_commands_toml() {
+        let commands_config =
+            read_commands_config(PathBuf::from("tests/fixtures/no_commands_toml").as_path())
+                .unwrap();
+        assert_eq!(commands_config, None);
     }
 }
