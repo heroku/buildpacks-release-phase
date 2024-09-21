@@ -1,4 +1,4 @@
-use std::path::Path;
+use std::{fmt, path::Path};
 
 use libcnb::{read_toml_file, write_toml_file, TomlFileError};
 use libherokubuildpack::toml::toml_select_value;
@@ -10,7 +10,13 @@ pub enum Error {
     TomlFileError(TomlFileError),
 }
 
-pub fn read_project_config(dir: &Path) -> Result<Option<toml::Value>, Error> {
+impl fmt::Display for Error {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{self:#?})")
+    }
+}
+
+pub fn read_project_config(dir: &Path) -> Result<toml::Value, Error> {
     let project_toml_path = dir.join("project.toml");
     let project_toml = if project_toml_path.is_file() {
         read_toml_file::<toml::Value>(project_toml_path).map_err(Error::TomlFileError)?
@@ -31,14 +37,10 @@ pub fn read_project_config(dir: &Path) -> Result<Option<toml::Value>, Error> {
     {
         release_commands.insert("release-build".to_string(), release_build_config);
     };
-    if release_commands.is_empty() {
-        Ok(None)
-    } else {
-        Ok(Some(release_commands.into()))
-    }
+    Ok(release_commands.into())
 }
 
-pub fn read_commands_config(dir: &Path) -> Result<Option<toml::Value>, Error> {
+pub fn read_commands_config(dir: &Path) -> Result<toml::Value, Error> {
     let commands_toml_path = dir.join("release-commands.toml");
     let commands_toml = if commands_toml_path.is_file() {
         read_toml_file::<toml::Value>(commands_toml_path).map_err(Error::TomlFileError)?
@@ -54,11 +56,7 @@ pub fn read_commands_config(dir: &Path) -> Result<Option<toml::Value>, Error> {
     {
         release_commands.insert("release-build".to_string(), release_build_config);
     };
-    if release_commands.is_empty() {
-        Ok(None)
-    } else {
-        Ok(Some(release_commands.into()))
-    }
+    Ok(release_commands.into())
 }
 
 pub fn write_commands_config(dir: &Path, commands_toml: &toml::Value) -> Result<(), Error> {
@@ -102,8 +100,7 @@ mod tests {
             PathBuf::from("../../buildpacks/release-phase/tests/fixtures/project_uses_release")
                 .as_path(),
         )
-        .unwrap()
-        .expect("TOML value");
+        .unwrap();
         let expected_toml: toml::Value = toml! {
             [[release]]
             command = ["bash"]
@@ -132,8 +129,7 @@ mod tests {
             )
             .as_path(),
         )
-        .unwrap()
-        .expect("TOML value");
+        .unwrap();
         let expected_toml: toml::Value = toml! {
             [release-build]
             command = ["bash"]
@@ -153,16 +149,16 @@ mod tests {
             PathBuf::from("../../buildpacks/release-phase/tests/fixtures/no_project_toml")
                 .as_path(),
         )
-        .unwrap();
-        assert_eq!(project_config, None);
+        .unwrap()
+        .as_table()
+        .cloned();
+        assert!(project_config.unwrap().is_empty());
     }
 
     #[test]
     fn reads_commands_toml_for_release_commands() {
         let commands_config =
-            read_commands_config(PathBuf::from("tests/fixtures/uses_release").as_path())
-                .unwrap()
-                .expect("TOML value");
+            read_commands_config(PathBuf::from("tests/fixtures/uses_release").as_path()).unwrap();
         let expected_toml: toml::Value = toml! {
             [[release]]
             command = ["bash"]
@@ -187,8 +183,7 @@ mod tests {
     fn reads_commands_toml_for_release_build_command() {
         let commands_config =
             read_commands_config(PathBuf::from("tests/fixtures/uses_release_build").as_path())
-                .unwrap()
-                .expect("TOML value");
+                .unwrap();
         let expected_toml: toml::Value = toml! {
             [release-build]
             command = ["bash"]
@@ -206,11 +201,21 @@ mod tests {
     fn no_commands_toml() {
         let commands_config =
             read_commands_config(PathBuf::from("tests/fixtures/no_commands_toml").as_path())
-                .unwrap();
-        assert_eq!(commands_config, None);
+                .unwrap()
+                .as_table()
+                .cloned();
+        assert!(commands_config.unwrap().is_empty());
     }
 
+    // The write tests all touch the same file, so run them sequentially.
     #[test]
+    fn writes_commands_toml_all() {
+        writes_commands_toml();
+        writes_empty_commands_toml();
+        write_fails_for_bad_release();
+        write_fails_for_bad_release_build();
+    }
+
     fn writes_commands_toml() {
         let commands_config: toml::Value = toml! {
             [[release]]
@@ -245,7 +250,24 @@ mod tests {
         );
     }
 
-    #[test]
+    fn writes_empty_commands_toml() {
+        let commands_config: toml::Value = toml! {
+            irrelevant_property = "that's me"
+        }
+        .into();
+
+        let dir = env::temp_dir();
+        write_commands_config(&dir, &commands_config).expect("toml file is written");
+        let generated_path = dir.join("release-commands.toml");
+
+        let generated_toml =
+            read_toml_file::<toml::Value>(&generated_path).expect("toml file is read");
+        remove_file(&generated_path).expect("toml file is deleted");
+
+        let table = generated_toml.as_table().expect("a toml table");
+        assert!(table.is_empty());
+    }
+
     fn write_fails_for_bad_release() {
         let commands_config: toml::Value = toml! {
             [release]
@@ -259,7 +281,6 @@ mod tests {
         assert!(matches!(result, Err(Error::ReleaseCommandsMustBeArray)));
     }
 
-    #[test]
     fn write_fails_for_bad_release_build() {
         let commands_config: toml::Value = toml! {
             [[release-build]]

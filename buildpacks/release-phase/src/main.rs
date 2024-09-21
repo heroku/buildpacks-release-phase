@@ -1,11 +1,15 @@
 mod errors;
+mod setup_release_phase;
 
 use crate::errors::{on_error, ReleasePhaseBuildpackError};
 use libcnb::build::{BuildContext, BuildResult, BuildResultBuilder};
+use libcnb::data::launch::{LaunchBuilder, ProcessBuilder};
+use libcnb::data::process_type;
 use libcnb::detect::{DetectContext, DetectResult, DetectResultBuilder};
 use libcnb::generic::{GenericMetadata, GenericPlatform};
 use libcnb::{buildpack_main, Buildpack, Error};
 use libherokubuildpack::log::log_header;
+use setup_release_phase::setup_release_phase;
 
 // Silence unused dependency warning for
 // dependencies only used in tests
@@ -27,9 +31,30 @@ impl Buildpack for ReleasePhaseBuildpack {
         DetectResultBuilder::pass().build()
     }
 
-    fn build(&self, _context: BuildContext<Self>) -> libcnb::Result<BuildResult, Self::Error> {
+    fn build(&self, context: BuildContext<Self>) -> libcnb::Result<BuildResult, Self::Error> {
         log_header(BUILDPACK_NAME);
-        BuildResultBuilder::new().build()
+
+        let release_phase_layer = setup_release_phase(&context)?;
+
+        BuildResultBuilder::new()
+            .launch(
+                LaunchBuilder::new()
+                    .process(
+                        ProcessBuilder::new(
+                            process_type!("release"),
+                            [
+                                "exec-release-commands",
+                                &release_phase_layer
+                                    .path()
+                                    .join("release-commands.toml")
+                                    .to_string_lossy(),
+                            ],
+                        )
+                        .build(),
+                    )
+                    .build(),
+            )
+            .build()
     }
 
     fn on_error(&self, error: Error<Self::Error>) {
