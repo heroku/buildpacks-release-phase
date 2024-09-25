@@ -12,7 +12,34 @@ fn project_uses_release() {
         assert_contains!(ctx.pack_stdout, "Successfully built image");
         start_container_entrypoint(&ctx, &"release".to_string(), |container| {
             let log_output = container.logs_now();
-            assert_contains!(log_output.stderr, "Command executor configuration:");
+            assert_contains!(log_output.stderr, "release-phase command executor plan:");
+            assert_contains!(log_output.stdout, "Hello from Release Phase Buildpack!");
+            assert_contains!(
+                log_output.stdout,
+                "Hello again from Release Phase Buildpack!"
+            );
+            assert_contains!(
+                log_output.stderr,
+                "release-phase command executor complete."
+            );
+        });
+    });
+}
+
+#[test]
+#[ignore = "integration test"]
+fn project_uses_release_build() {
+    release_phase_integration_test("./fixtures/project_uses_release_build", |ctx| {
+        assert_contains!(ctx.pack_stdout, "Release Phase");
+        assert_contains!(ctx.pack_stdout, "Successfully built image");
+        start_container_entrypoint(&ctx, &"release".to_string(), |container| {
+            let log_output = container.logs_now();
+            assert_contains!(log_output.stderr, "release-phase command executor plan:");
+            assert_contains!(log_output.stdout, "Build in Release Phase Buildpack!");
+            assert_contains!(
+                log_output.stderr,
+                "release-phase command executor complete."
+            );
         });
     });
 }

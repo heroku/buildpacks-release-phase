@@ -18,7 +18,7 @@ pub(crate) fn setup_release_phase(
         },
     )?;
 
-    let project_config = read_project_config(&context.app_dir)
+    let project_config = read_project_config(&context.app_dir.join("project.toml"))
         .map_err(ReleasePhaseBuildpackError::ConfigurationFailed)?;
 
     write_commands_config(release_phase_layer.path().as_path(), &project_config)

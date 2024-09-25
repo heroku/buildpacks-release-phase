@@ -730,6 +730,7 @@ version = "0.0.0"
 dependencies = [
  "libcnb 0.22.0",
  "libherokubuildpack 0.22.0",
+ "serde",
  "toml",
 ]
 

@@ -5,5 +5,5 @@ schema-version = "0.2"
 uri = "heroku/release-phase"
 
 [com.heroku.phase.release-build]
-command = ["bash"]
+command = "bash"
 args = ["-c", "echo 'Build in Release Phase Buildpack!'"]
