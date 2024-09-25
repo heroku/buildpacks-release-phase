@@ -20,8 +20,8 @@ fn main() {
     }
 }
 
-fn exec_release_sequence(dir: &Path) -> Result<(), release_phase_utils::Error> {
-    let config = read_commands_config(dir)?;
+fn exec_release_sequence(commands_toml_path: &Path) -> Result<(), release_phase_utils::Error> {
+    let config = read_commands_config(commands_toml_path)?;
     eprintln!("release-phase command executor plan: {config:#?}");
 
     if let Some(release_build_config) = config.release_build {
