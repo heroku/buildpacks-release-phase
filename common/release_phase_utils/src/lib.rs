@@ -12,7 +12,17 @@ pub enum Error {
 
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{self:#?})")
+        match self {
+            Error::ReleaseCommandsMustBeArray => write!(
+                f,
+                "Configuration of `release` must be an array of commands."
+            ),
+            Error::ReleaseBuildCommandMustBeTable => write!(
+                f,
+                "Configuration of `release-build` must be a single command."
+            ),
+            Error::TomlFileError(error) => write!(f, "{error:#?}"),
+        }
     }
 }
 

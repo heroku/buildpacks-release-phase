@@ -2,12 +2,17 @@
 #![allow(unused_crate_dependencies)]
 
 use libcnb_test::assert_contains;
-use test_support::release_phase_integration_test;
+use test_support::{release_phase_integration_test, start_container_entrypoint};
 
 #[test]
 #[ignore = "integration test"]
 fn project_uses_release() {
     release_phase_integration_test("./fixtures/project_uses_release", |ctx| {
         assert_contains!(ctx.pack_stdout, "Release Phase");
+        assert_contains!(ctx.pack_stdout, "Successfully built image");
+        start_container_entrypoint(&ctx, &"release".to_string(), |container| {
+            let log_output = container.logs_now();
+            assert_contains!(log_output.stderr, "Command executor configuration:");
+        });
     });
 }

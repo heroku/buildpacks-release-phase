@@ -24,12 +24,12 @@ pub(crate) fn setup_release_phase(
     write_commands_config(release_phase_layer.path().as_path(), &project_config)
         .map_err(ReleasePhaseBuildpackError::ConfigurationFailed)?;
 
+    let exec_destination = release_phase_layer.path().join("bin");
+    fs::create_dir_all(&exec_destination)
+        .map_err(ReleasePhaseBuildpackError::CannotInstallCommandExecutor)?;
     fs::copy(
         additional_buildpack_binary_path!("exec-release-commands"),
-        release_phase_layer
-            .path()
-            .join("bin")
-            .join("exec-release-commands"),
+        exec_destination.join("exec-release-commands"),
     )
     .map_err(ReleasePhaseBuildpackError::CannotInstallCommandExecutor)?;
 

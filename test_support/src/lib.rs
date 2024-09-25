@@ -108,6 +108,24 @@ pub fn start_container(ctx: &TestContext, in_container: impl Fn(&ContainerContex
     );
 }
 
+pub fn start_container_entrypoint(
+    ctx: &TestContext,
+    entrypoint: &String,
+    in_container: impl Fn(&ContainerContext),
+) {
+    ctx.start_container(ContainerConfig::new().entrypoint(entrypoint), |container| {
+        in_container(&container);
+        let container_logs = container.logs_now();
+        println!(
+            "
+------ begin {} logs (stderr) ------
+{}------ end (stderr) & begin (stdout) ------
+{}------ end {} logs ------",
+            entrypoint, container_logs.stderr, container_logs.stdout, entrypoint
+        );
+    });
+}
+
 pub fn assert_web_response(ctx: &TestContext, expected_response_body: &'static str) {
     start_container(ctx, |_container, socket_addr| {
         let response = retry(DEFAULT_RETRIES, DEFAULT_RETRY_DELAY, || {

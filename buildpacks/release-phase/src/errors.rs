@@ -29,28 +29,20 @@ pub(crate) fn on_error(error: libcnb::Error<ReleasePhaseBuildpackError>) {
 fn on_buildpack_error(error: ReleasePhaseBuildpackError, logger: Box<dyn StartedLogger>) {
     match error {
         ReleasePhaseBuildpackError::CannotInstallCommandExecutor(error) => {
-            on_unexpected_io_error(&error, logger);
+            print_error_details(logger, &error)
+                .announce()
+                .error(&formatdoc! {"
+                Cannot install Command Executor in {buildpack_name}
+            ", buildpack_name = fmt::value(BUILDPACK_NAME) });
         }
         ReleasePhaseBuildpackError::ConfigurationFailed(error) => {
-            on_configuration_error(&error, logger);
+            print_error_details(logger, &error)
+                .announce()
+                .error(&formatdoc! {"
+                Configuration failed for {buildpack_name}
+            ", buildpack_name = fmt::value(BUILDPACK_NAME) });
         }
     }
-}
-
-fn on_unexpected_io_error(error: &std::io::Error, logger: Box<dyn StartedLogger>) {
-    print_error_details(logger, &error)
-        .announce()
-        .error(&formatdoc! {"
-        Unexpected IO Error in {buildpack_name}
-    ", buildpack_name = fmt::value(BUILDPACK_NAME) });
-}
-
-fn on_configuration_error(error: &release_phase_utils::Error, logger: Box<dyn StartedLogger>) {
-    print_error_details(logger, &error)
-        .announce()
-        .error(&formatdoc! {"
-        Configuration failed for {buildpack_name}
-    ", buildpack_name = fmt::value(BUILDPACK_NAME) });
 }
 
 fn on_framework_error(
