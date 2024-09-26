@@ -1,0 +1,11 @@
+[release-build]
+command = "bash"
+args = ["-c", "echo '1. Release Build from all release commands' >> tests/fixtures/uses_all_release_commands/exec-release-commands-test-output.txt"]
+
+[[release]]
+command = "bash"
+args = ["-c", "echo '2. Release from all release commands' >> tests/fixtures/uses_all_release_commands/exec-release-commands-test-output.txt"]
+
+[[release]]
+command = "bash"
+args = ["-c", "echo '3. Another release from all release commands' >> tests/fixtures/uses_all_release_commands/exec-release-commands-test-output.txt"]

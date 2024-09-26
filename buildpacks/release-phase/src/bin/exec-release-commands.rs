@@ -50,3 +50,33 @@ fn exec_release_sequence(commands_toml_path: &Path) -> Result<(), release_phase_
 
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use std::{
+        fs::{self, remove_file},
+        path::Path,
+    };
+
+    use crate::exec_release_sequence;
+
+    #[test]
+    fn invokes_command_sequence() {
+        let expected_output = r"1. Release Build from all release commands
+2. Release from all release commands
+3. Another release from all release commands
+";
+
+        exec_release_sequence(Path::new(
+            "tests/fixtures/uses_all_release_commands/release-commands.toml",
+        ))
+        .expect("release commands completed");
+
+        let result_path = Path::new(
+            "tests/fixtures/uses_all_release_commands/exec-release-commands-test-output.txt",
+        );
+        let result_output = fs::read_to_string(result_path).unwrap();
+        remove_file(result_path).expect("test result output file is deleted");
+        assert_eq!(result_output, expected_output);
+    }
+}
