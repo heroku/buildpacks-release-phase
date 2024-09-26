@@ -1,4 +1,7 @@
-use std::{fmt, path::Path};
+use std::{
+    fmt::{self, Debug},
+    path::Path,
+};
 
 use libcnb::{read_toml_file, write_toml_file, TomlFileError};
 use libherokubuildpack::toml::toml_select_value;
@@ -11,11 +14,42 @@ pub struct ReleaseCommands {
     pub release: Option<Vec<Executable>>,
 }
 
+impl fmt::Display for ReleaseCommands {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "commands:\n  release-build: {}\n  release: {}",
+            self.release_build
+                .clone()
+                .map_or("None".to_string(), |r| format!("{r}")),
+            self.release.clone().map_or("None".to_string(), |r| r
+                .into_iter()
+                .fold(String::new(), |r, e| format!("{r}\n    {e}"))),
+        )
+    }
+}
+
 #[derive(Deserialize, Serialize, Eq, PartialEq, Debug, Default, Clone)]
 pub struct Executable {
     pub command: String,
     pub args: Option<Vec<String>>,
     pub source: Option<String>,
+}
+
+impl fmt::Display for Executable {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "{}{}{}",
+            self.command,
+            self.args
+                .clone()
+                .map_or(String::new(), |a| format!(" {}", a.join(" "))),
+            self.source
+                .clone()
+                .map_or(String::new(), |s| format!(" ({s})")),
+        )
+    }
 }
 
 #[derive(Debug)]

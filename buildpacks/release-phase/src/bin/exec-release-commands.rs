@@ -10,11 +10,11 @@ fn main() {
     let commands_toml_path = Path::new(&args[1]);
     match exec_release_sequence(commands_toml_path) {
         Ok(()) => {
-            eprintln!("release-phase command executor complete.");
+            eprintln!("release-phase complete.");
             std::process::exit(0);
         }
         Err(error) => {
-            eprintln!("release-phase command executor failed: {error:#?}");
+            eprintln!("release-phase failed: {error:#?}");
             std::process::exit(1);
         }
     }
@@ -22,10 +22,10 @@ fn main() {
 
 fn exec_release_sequence(commands_toml_path: &Path) -> Result<(), release_phase_utils::Error> {
     let config = read_commands_config(commands_toml_path)?;
-    eprintln!("release-phase command executor plan: {config:#?}");
+    eprintln!("release-phase plan, {config}");
 
     if let Some(release_build_config) = config.release_build {
-        eprintln!("release-phase executing release-build command: {release_build_config:#?}");
+        eprintln!("release-phase executing release-build command: {release_build_config}");
         let mut cmd = Command::new(release_build_config.command);
         release_build_config.args.clone().map(|v| cmd.args(v));
         let output = cmd
@@ -37,7 +37,7 @@ fn exec_release_sequence(commands_toml_path: &Path) -> Result<(), release_phase_
 
     if let Some(release_config) = config.release {
         for config in &release_config {
-            eprintln!("release-phase executing release command: {config:#?}");
+            eprintln!("release-phase executing release command: {config}");
             let mut cmd = Command::new(&config.command);
             config.args.clone().map(|v| cmd.args(v));
             let output = cmd
