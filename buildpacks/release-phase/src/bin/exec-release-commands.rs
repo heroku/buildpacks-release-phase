@@ -3,7 +3,7 @@
 
 use std::{env, path::Path, process::Command};
 
-use release_phase_utils::read_commands_config;
+use release_commands::read_commands_config;
 
 fn main() {
     let args: Vec<String> = env::args().collect();
@@ -20,7 +20,7 @@ fn main() {
     }
 }
 
-fn exec_release_sequence(commands_toml_path: &Path) -> Result<(), release_phase_utils::Error> {
+fn exec_release_sequence(commands_toml_path: &Path) -> Result<(), release_commands::Error> {
     let config = read_commands_config(commands_toml_path)?;
     eprintln!("release-phase plan, {config}");
 
@@ -30,7 +30,7 @@ fn exec_release_sequence(commands_toml_path: &Path) -> Result<(), release_phase_
         release_build_config.args.clone().map(|v| cmd.args(v));
         let output = cmd
             .output()
-            .map_err(release_phase_utils::Error::ReleaseCommandExecError)?;
+            .map_err(release_commands::Error::ReleaseCommandExecError)?;
         eprint!("{}", String::from_utf8_lossy(&output.stderr));
         print!("{}", String::from_utf8_lossy(&output.stdout));
     };
@@ -42,7 +42,7 @@ fn exec_release_sequence(commands_toml_path: &Path) -> Result<(), release_phase_
             config.args.clone().map(|v| cmd.args(v));
             let output = cmd
                 .output()
-                .map_err(release_phase_utils::Error::ReleaseCommandExecError)?;
+                .map_err(release_commands::Error::ReleaseCommandExecError)?;
             print!("{}", String::from_utf8_lossy(&output.stdout));
             eprint!("{}", String::from_utf8_lossy(&output.stderr));
         }

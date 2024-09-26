@@ -720,12 +720,12 @@ dependencies = [
  "libcnb 0.22.0",
  "libcnb-test",
  "libherokubuildpack 0.22.0",
- "release_phase_utils",
+ "release_commands",
  "test_support",
 ]
 
 [[package]]
-name = "release_phase_utils"
+name = "release_commands"
 version = "0.0.0"
 dependencies = [
  "libcnb 0.22.0",

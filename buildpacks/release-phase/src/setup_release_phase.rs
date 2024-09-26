@@ -5,7 +5,7 @@ use libcnb::additional_buildpack_binary_path;
 use libcnb::data::layer_name;
 use libcnb::layer::LayerRef;
 use libcnb::{build::BuildContext, layer::UncachedLayerDefinition};
-use release_phase_utils::{read_project_config, write_commands_config};
+use release_commands::{read_project_config, write_commands_config};
 
 pub(crate) fn setup_release_phase(
     context: &BuildContext<ReleasePhaseBuildpack>,

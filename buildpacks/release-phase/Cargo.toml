@@ -11,7 +11,7 @@ libcnb = "0.22.0"
 commons_ruby = { git = "https://github.com/heroku/buildpacks-ruby", branch = "main", package = "commons" }
 libherokubuildpack = { version = "=0.22.0", default-features = false, features = ["fs", "log"] }
 indoc = "2"
-release_phase_utils = { path = "../../common/release_phase_utils" }
+release_commands = { path = "../../common/release_commands" }
 
 [dev-dependencies]
 libcnb-test = "=0.22.0"

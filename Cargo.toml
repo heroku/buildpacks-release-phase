@@ -2,7 +2,7 @@
 resolver = "2"
 members = [
     "buildpacks/release-phase",
-    "common/release_phase_utils"
+    "common/release_commands"
 ]
 
 [workspace.package]
