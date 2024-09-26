@@ -9,7 +9,17 @@ use release_commands::{read_project_config, write_commands_config};
 
 pub(crate) fn setup_release_phase(
     context: &BuildContext<ReleasePhaseBuildpack>,
-) -> Result<LayerRef<ReleasePhaseBuildpack, (), ()>, libcnb::Error<ReleasePhaseBuildpackError>> {
+) -> Result<
+    Option<LayerRef<ReleasePhaseBuildpack, (), ()>>,
+    libcnb::Error<ReleasePhaseBuildpackError>,
+> {
+    let project_config = read_project_config(&context.app_dir.join("project.toml"))
+        .map_err(ReleasePhaseBuildpackError::ConfigurationFailed)?;
+
+    if project_config.release.is_none() && project_config.release_build.is_none() {
+        return Ok(None);
+    }
+
     let release_phase_layer = context.uncached_layer(
         layer_name!("main"),
         UncachedLayerDefinition {
@@ -17,9 +27,6 @@ pub(crate) fn setup_release_phase(
             launch: true,
         },
     )?;
-
-    let project_config = read_project_config(&context.app_dir.join("project.toml"))
-        .map_err(ReleasePhaseBuildpackError::ConfigurationFailed)?;
 
     write_commands_config(release_phase_layer.path().as_path(), &project_config)
         .map_err(ReleasePhaseBuildpackError::ConfigurationFailed)?;
@@ -33,5 +40,5 @@ pub(crate) fn setup_release_phase(
     )
     .map_err(ReleasePhaseBuildpackError::CannotInstallCommandExecutor)?;
 
-    Ok(release_phase_layer)
+    Ok(Some(release_phase_layer))
 }

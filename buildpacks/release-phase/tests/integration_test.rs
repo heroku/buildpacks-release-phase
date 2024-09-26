@@ -37,3 +37,12 @@ fn project_uses_release_build() {
         });
     });
 }
+
+#[test]
+#[ignore = "integration test"]
+fn no_project_toml() {
+    release_phase_integration_test("./fixtures/no_project_toml", |ctx| {
+        assert_contains!(ctx.pack_stdout, "Release Phase");
+        assert_contains!(ctx.pack_stdout, "Successfully built image");
+    });
+}

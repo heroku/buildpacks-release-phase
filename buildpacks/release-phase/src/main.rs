@@ -34,27 +34,30 @@ impl Buildpack for ReleasePhaseBuildpack {
     fn build(&self, context: BuildContext<Self>) -> libcnb::Result<BuildResult, Self::Error> {
         log_header(BUILDPACK_NAME);
 
-        let release_phase_layer = setup_release_phase(&context)?;
-
-        BuildResultBuilder::new()
-            .launch(
-                LaunchBuilder::new()
-                    .process(
-                        ProcessBuilder::new(
-                            process_type!("release"),
-                            [
-                                "exec-release-commands",
-                                &release_phase_layer
-                                    .path()
-                                    .join("release-commands.toml")
-                                    .to_string_lossy(),
-                            ],
-                        )
-                        .build(),
+        match setup_release_phase(&context)? {
+            Some(release_phase_layer) => {
+                return BuildResultBuilder::new()
+                    .launch(
+                        LaunchBuilder::new()
+                            .process(
+                                ProcessBuilder::new(
+                                    process_type!("release"),
+                                    [
+                                        "exec-release-commands",
+                                        &release_phase_layer
+                                            .path()
+                                            .join("release-commands.toml")
+                                            .to_string_lossy(),
+                                    ],
+                                )
+                                .build(),
+                            )
+                            .build(),
                     )
-                    .build(),
-            )
-            .build()
+                    .build()
+            }
+            None => BuildResultBuilder::new().build(),
+        }
     }
 
     fn on_error(&self, error: Error<Self::Error>) {
