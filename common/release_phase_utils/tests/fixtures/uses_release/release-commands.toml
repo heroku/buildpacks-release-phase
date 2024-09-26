@@ -1,0 +1,7 @@
+[[release]]
+command = "bash"
+args = ["-c", "echo 'Release in release-commands.toml'"]
+
+[[release]]
+command = "bash"
+args = ["-c", "echo 'Another release command in release-commands.toml'"]

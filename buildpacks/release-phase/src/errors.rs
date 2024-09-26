@@ -11,12 +11,38 @@ If the issue persists and you think you found a bug in the buildpack then reprod
 locally with a minimal example and open an issue in the buildpack's GitHub repository with the details.";
 
 #[derive(Debug)]
-pub(crate) enum ReleasePhaseBuildpackError {}
+pub(crate) enum ReleasePhaseBuildpackError {
+    CannotInstallCommandExecutor(std::io::Error),
+    ConfigurationFailed(release_phase_utils::Error),
+}
 
 pub(crate) fn on_error(error: libcnb::Error<ReleasePhaseBuildpackError>) {
     let logger = BuildLog::new(stdout()).without_buildpack_name();
-    let framework_error = error;
-    on_framework_error(&framework_error, logger);
+    match error {
+        libcnb::Error::BuildpackError(buildpack_error) => {
+            on_buildpack_error(buildpack_error, logger);
+        }
+        framework_error => on_framework_error(&framework_error, logger),
+    }
+}
+
+fn on_buildpack_error(error: ReleasePhaseBuildpackError, logger: Box<dyn StartedLogger>) {
+    match error {
+        ReleasePhaseBuildpackError::CannotInstallCommandExecutor(error) => {
+            print_error_details(logger, &error)
+                .announce()
+                .error(&formatdoc! {"
+                Cannot install Command Executor in {buildpack_name}
+            ", buildpack_name = fmt::value(BUILDPACK_NAME) });
+        }
+        ReleasePhaseBuildpackError::ConfigurationFailed(error) => {
+            print_error_details(logger, &error)
+                .announce()
+                .error(&formatdoc! {"
+                Configuration failed for {buildpack_name}
+            ", buildpack_name = fmt::value(BUILDPACK_NAME) });
+        }
+    }
 }
 
 fn on_framework_error(
