@@ -13,7 +13,7 @@ locally with a minimal example and open an issue in the buildpack's GitHub repos
 #[derive(Debug)]
 pub(crate) enum ReleasePhaseBuildpackError {
     CannotInstallCommandExecutor(std::io::Error),
-    ConfigurationFailed(release_phase_utils::Error),
+    ConfigurationFailed(release_commands::Error),
 }
 
 pub(crate) fn on_error(error: libcnb::Error<ReleasePhaseBuildpackError>) {
