@@ -114,8 +114,7 @@ pub fn start_container_entrypoint(
     in_container: impl Fn(&ContainerContext),
 ) {
     ctx.start_container(ContainerConfig::new().entrypoint(entrypoint), |container| {
-        in_container(&container);
-        let container_logs = container.logs_now();
+        let container_logs = container.logs_wait();
         println!(
             "
 ------ begin {} logs (stderr) ------
@@ -123,6 +122,7 @@ pub fn start_container_entrypoint(
 {}------ end {} logs ------",
             entrypoint, container_logs.stderr, container_logs.stdout, entrypoint
         );
+        in_container(&container);
     });
 }
 
