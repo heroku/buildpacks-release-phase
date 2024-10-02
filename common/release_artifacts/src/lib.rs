@@ -78,11 +78,16 @@ mod tests {
 
     #[test]
     fn extract_archive_should_output_a_directory() {
-        let output_dir = "artifacts-from-test";
+        let output_dir = Path::new("artifacts-from-test");
         fs::remove_dir_all(output_dir).unwrap_or_default();
         extract_archive(Path::new("test/fixtures/static-artifacts.tgz"), output_dir).unwrap();
         let result_metadata = fs::metadata(output_dir).unwrap();
         assert!(result_metadata.is_dir());
+        let result_metadata = fs::metadata(output_dir.join("index.html")).unwrap();
+        assert!(result_metadata.is_file());
+        let result_metadata =
+            fs::metadata(output_dir.join("images/desktop-heroku-pride.jpg")).unwrap();
+        assert!(result_metadata.is_file());
         fs::remove_dir_all(output_dir).unwrap_or_default();
     }
 
