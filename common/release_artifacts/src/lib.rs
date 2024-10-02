@@ -92,7 +92,7 @@ mod tests {
     }
 
     #[test]
-    fn extarct_archive_should_fail_for_missing_source_file() {
+    fn extract_archive_should_fail_for_missing_source_file() {
         let output_dir = "artifacts-from-test";
         fs::remove_dir_all(output_dir).unwrap_or_default();
         extract_archive(Path::new("non-existent-path"), output_dir)
