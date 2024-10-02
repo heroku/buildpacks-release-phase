@@ -14,21 +14,12 @@ pub fn create_archive(
     source_dir: &Path,
     destination: impl AsRef<Path>,
 ) -> Result<(), std::io::Error> {
-    let temp_dir = env::temp_dir();
-    let tar_filename = "archive.tar";
-    let tar_file: File = File::create(temp_dir.join(tar_filename))?;
-    let mut tar_builder = Builder::new(&tar_file);
-    tar_builder.follow_symlinks(false);
-    // add to root of archive
-    tar_builder.append_dir_all("", source_dir)?;
-    tar_builder.into_inner()?;
-    let tar_buf = BufReader::new(&tar_file);
     let output_file: File = File::create(destination)?;
-    let mut gz = GzBuilder::new()
-        .filename(tar_filename)
-        .write(output_file, Compression::default());
-    gz.write_all(tar_buf.buffer())?;
-    gz.finish()?;
+    let gz = GzBuilder::new().write(output_file, Compression::default());
+    let mut tar = tar::Builder::new(gz);
+    tar.follow_symlinks(false);
+    // add to root of archive
+    tar.append_dir_all("", source_dir)?;
     Ok(())
 }
 
@@ -44,23 +35,41 @@ pub fn extract_archive(
 
 #[cfg(test)]
 mod tests {
-    use std::{fs, path::Path};
+    use std::{
+        fs::{self, File},
+        path::{Path, PathBuf},
+    };
+
+    use flate2::read::GzDecoder;
+    use tar::Archive;
 
     use crate::{create_archive, extract_archive};
 
     #[test]
     fn create_archive_should_output_tar_gz_file() {
-        let output_file = "artifact-from-test.zip";
+        let output_file = "artifact-from-test-succeeds.tgz";
+        let output_dir = Path::new("artifact-from-test");
         fs::remove_file(output_file).unwrap_or_default();
+        fs::remove_dir_all(output_dir).unwrap_or_default();
+
         create_archive(Path::new("test/fixtures/static-artifacts"), output_file).unwrap();
         let result_metadata = fs::metadata(output_file).unwrap();
         assert!(result_metadata.is_file());
+        let output = File::open(output_file).unwrap();
+        let mut archive = Archive::new(GzDecoder::new(&output));
+        archive.unpack(output_dir).unwrap();
+        let result_metadata = fs::metadata(output_dir.join("index.html")).unwrap();
+        assert!(result_metadata.is_file());
+        let result_metadata =
+            fs::metadata(output_dir.join("images/desktop-heroku-pride.jpg")).unwrap();
+        assert!(result_metadata.is_file());
         fs::remove_file(output_file).unwrap_or_default();
+        fs::remove_dir_all(output_dir).unwrap_or_default();
     }
 
     #[test]
     fn create_archive_should_fail_for_missing_source_dir() {
-        let output_file = "artifact-from-test.zip";
+        let output_file = "artifact-from-test-fails.tgz";
         fs::remove_file(output_file).unwrap_or_default();
         create_archive(Path::new("non-existent-path"), output_file)
             .expect_err("should fail for missing source dir");
