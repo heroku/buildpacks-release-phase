@@ -1,13 +1,6 @@
-use std::{
-    env,
-    io::{BufReader, Write},
-    path::Path,
-};
-
 use flate2::{read::GzDecoder, Compression, GzBuilder};
-use std::fs::File;
-use std::io::Seek;
-use tar::{Archive, Builder};
+use std::{fs::File, path::Path};
+use tar::Archive;
 
 /// Tars & compresses contents of the given directory to a .tar.gz file.
 pub fn create_archive(
@@ -37,7 +30,7 @@ pub fn extract_archive(
 mod tests {
     use std::{
         fs::{self, File},
-        path::{Path, PathBuf},
+        path::Path,
     };
 
     use flate2::read::GzDecoder;
