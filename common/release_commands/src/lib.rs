@@ -107,11 +107,11 @@ pub fn read_project_config(project_toml_path: &Path) -> Result<ReleaseCommands, 
         toml::Table::new().into()
     };
 
-    let mut release_commands = toml::Table::new();
+    let mut commands_toml = toml::Table::new();
     if let Some(release_config) =
         toml_select_value(vec!["com", "heroku", "phase", "release"], &project_toml).cloned()
     {
-        release_commands.insert("release".to_string(), release_config);
+        commands_toml.insert("release".to_string(), release_config);
     };
     if let Some(release_build_config) = toml_select_value(
         vec!["com", "heroku", "phase", "release-build"],
@@ -119,12 +119,25 @@ pub fn read_project_config(project_toml_path: &Path) -> Result<ReleaseCommands, 
     )
     .cloned()
     {
-        release_commands.insert("release-build".to_string(), release_build_config);
+        commands_toml.insert("release-build".to_string(), release_build_config);
     };
 
-    release_commands
+    let mut commands = commands_toml
         .try_into::<ReleaseCommands>()
-        .map_err(Error::TomlProjectDeserializeError)
+        .map_err(Error::TomlProjectDeserializeError)?;
+
+    if commands.release_build.is_some() {
+        // Add the uploader as the first release command, immediately after release-build.
+        let upload_helper = Executable {
+            command: "upload-release-artifacts".to_string(),
+            args: Some(vec!["static-artifacts/".to_string()]),
+            source: Some("Heroku Release Phase Buildpack".to_string()),
+        };
+        commands.release =
+            Some([vec![upload_helper], commands.release.map_or(vec![], |v| v)].concat());
+    }
+
+    Ok(commands)
 }
 
 pub fn read_commands_config(commands_toml_path: &Path) -> Result<ReleaseCommands, Error> {
@@ -214,7 +227,14 @@ mod tests {
                 source: None,
             })
         );
-        assert_eq!(project_config.release, None);
+        assert_eq!(
+            project_config.release,
+            Some(vec![Executable {
+                command: "upload-release-artifacts".to_string(),
+                args: Some(vec!["static-artifacts/".to_string()]),
+                source: Some("Heroku Release Phase Buildpack".to_string()),
+            }])
+        );
     }
 
     #[test]
