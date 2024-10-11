@@ -18,6 +18,11 @@ use libcnb_test as _;
 #[cfg(test)]
 use test_support as _;
 
+// Silence unused dependency warning for
+// dependencies used in bin/ executables
+use release_artifacts as _;
+use tokio as _;
+
 const BUILDPACK_NAME: &str = "Heroku Release Phase Buildpack";
 
 pub(crate) struct ReleasePhaseBuildpack;
