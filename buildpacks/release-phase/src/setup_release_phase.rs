@@ -6,7 +6,7 @@ use libcnb::data::layer_name;
 use libcnb::layer::LayerRef;
 use libcnb::{build::BuildContext, layer::UncachedLayerDefinition};
 use libherokubuildpack::log::log_info;
-use release_commands::{read_project_config, write_commands_config};
+use release_commands::{generate_commands_config, write_commands_config};
 
 pub(crate) fn setup_release_phase(
     context: &BuildContext<ReleasePhaseBuildpack>,
@@ -14,10 +14,10 @@ pub(crate) fn setup_release_phase(
     Option<LayerRef<ReleasePhaseBuildpack, (), ()>>,
     libcnb::Error<ReleasePhaseBuildpackError>,
 > {
-    let project_config = read_project_config(&context.app_dir.join("project.toml"))
+    let commands_config = generate_commands_config(&context.app_dir.join("project.toml"))
         .map_err(ReleasePhaseBuildpackError::ConfigurationFailed)?;
 
-    if project_config.release.is_none() && project_config.release_build.is_none() {
+    if commands_config.release.is_none() && commands_config.release_build.is_none() {
         log_info("No release commands are configured.");
         return Ok(None);
     }
@@ -31,7 +31,7 @@ pub(crate) fn setup_release_phase(
     )?;
 
     log_info("Writing release-commands.toml");
-    write_commands_config(release_phase_layer.path().as_path(), &project_config)
+    write_commands_config(release_phase_layer.path().as_path(), &commands_config)
         .map_err(ReleasePhaseBuildpackError::ConfigurationFailed)?;
 
     log_info("Installing processes…");
@@ -46,7 +46,7 @@ pub(crate) fn setup_release_phase(
     )
     .map_err(ReleasePhaseBuildpackError::CannotInstallCommandExecutor)?;
 
-    if project_config.release_build.is_some() {
+    if commands_config.release_build.is_some() {
         log_info("  upload-release-artifacts");
         fs::copy(
             additional_buildpack_binary_path!("upload-release-artifacts"),

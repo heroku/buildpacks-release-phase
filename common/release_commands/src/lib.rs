@@ -100,7 +100,7 @@ impl fmt::Display for Error {
     }
 }
 
-pub fn read_project_config(project_toml_path: &Path) -> Result<ReleaseCommands, Error> {
+pub fn generate_commands_config(project_toml_path: &Path) -> Result<ReleaseCommands, Error> {
     let project_toml = if project_toml_path.is_file() {
         read_toml_file::<toml::Value>(project_toml_path).map_err(Error::TomlProjectFileError)?
     } else {
@@ -168,15 +168,15 @@ mod tests {
     use libherokubuildpack::toml::toml_select_value;
     use toml::toml;
 
+    use crate::generate_commands_config;
     use crate::read_commands_config;
-    use crate::read_project_config;
     use crate::write_commands_config;
     use crate::Executable;
     use crate::ReleaseCommands;
 
     #[test]
     fn reads_project_toml_for_release_commands() {
-        let project_config = read_project_config(
+        let project_config = generate_commands_config(
             PathBuf::from(
                 "../../buildpacks/release-phase/tests/fixtures/project_uses_release/project.toml",
             )
@@ -209,7 +209,7 @@ mod tests {
 
     #[test]
     fn reads_project_toml_for_release_build_command() {
-        let project_config = read_project_config(
+        let project_config = generate_commands_config(
             PathBuf::from(
                 "../../buildpacks/release-phase/tests/fixtures/project_uses_release_build/project.toml",
             )
@@ -239,7 +239,7 @@ mod tests {
 
     #[test]
     fn no_project_toml() {
-        let project_config = read_project_config(
+        let project_config = generate_commands_config(
             PathBuf::from(
                 "../../buildpacks/release-phase/tests/fixtures/no_project_toml/project.toml",
             )
