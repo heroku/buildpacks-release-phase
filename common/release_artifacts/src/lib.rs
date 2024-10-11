@@ -42,6 +42,7 @@ pub async fn upload<S: ::std::hash::BuildHasher>(
         .await;
     let s3 = Client::new(&shared_config);
 
+    eprintln!("upload-release-artifacts putting archive: {archive_name}");
     upload_with_client(s3, bucket_name, bucket_key, archive_name).await
 }
 

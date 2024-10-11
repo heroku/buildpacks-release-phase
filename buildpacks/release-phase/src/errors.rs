@@ -12,6 +12,7 @@ locally with a minimal example and open an issue in the buildpack's GitHub repos
 
 #[derive(Debug)]
 pub(crate) enum ReleasePhaseBuildpackError {
+    CannotInstallArtifactUploader(std::io::Error),
     CannotInstallCommandExecutor(std::io::Error),
     ConfigurationFailed(release_commands::Error),
 }
@@ -28,11 +29,18 @@ pub(crate) fn on_error(error: libcnb::Error<ReleasePhaseBuildpackError>) {
 
 fn on_buildpack_error(error: ReleasePhaseBuildpackError, logger: Box<dyn StartedLogger>) {
     match error {
+        ReleasePhaseBuildpackError::CannotInstallArtifactUploader(error) => {
+            print_error_details(logger, &error)
+                .announce()
+                .error(&formatdoc! {"
+                Cannot install upload-release-artifacts for {buildpack_name}
+            ", buildpack_name = fmt::value(BUILDPACK_NAME) });
+        }
         ReleasePhaseBuildpackError::CannotInstallCommandExecutor(error) => {
             print_error_details(logger, &error)
                 .announce()
                 .error(&formatdoc! {"
-                Cannot install Command Executor in {buildpack_name}
+                Cannot install exec-release-commands for {buildpack_name}
             ", buildpack_name = fmt::value(BUILDPACK_NAME) });
         }
         ReleasePhaseBuildpackError::ConfigurationFailed(error) => {

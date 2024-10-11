@@ -1947,8 +1947,10 @@ dependencies = [
  "libcnb 0.22.0",
  "libcnb-test",
  "libherokubuildpack 0.22.0",
+ "release_artifacts",
  "release_commands",
  "test_support",
+ "tokio",
 ]
 
 [[package]]

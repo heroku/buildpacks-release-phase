@@ -20,6 +20,26 @@ This buildpack enhances Release Phase capabilities to support multiple, ordered 
 cargo test -- --include-ignored
 ```
 
+### Package & Run
+
+```bash
+cargo libcnb package
+
+pack build cnb-release-phase-test \
+  --buildpack packaged/x86_64-unknown-linux-musl/debug/heroku_release-phase \
+  --builder heroku/builder:24 \
+  --path buildpacks/release-phase/tests/fixtures/project_uses_release_build
+
+docker run -it cnb-release-phase-test bash
+/workspace$ export \
+  RELEASE_ID=my-test-1 \
+  STATIC_ARTIFACTS_AWS_ACCESS_KEY_ID=xxxxx \
+  STATIC_ARTIFACTS_AWS_SECRET_ACCESS_KEY=xxxxx \
+  STATIC_ARTIFACTS_URL=s3://xxxxx
+/workspace$ mkdir -p static-artifacts; echo "Hello static world!" > static-artifacts/note.txt
+/workspace$ upload-release-artifacts static-artifacts/
+```
+
 ### Releasing A New Version
 
 [Action workflows](https://github.com/heroku/buildpacks-release-phase/actions) are used to automate the release process:
