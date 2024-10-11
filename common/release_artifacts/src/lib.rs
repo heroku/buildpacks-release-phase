@@ -111,7 +111,11 @@ pub fn parse_s3_url(
                 bucket_name = addr.to_string();
             }
         },
-        None => return Err(ReleaseArtifactsError::StorageURLHostMissing),
+        None => {
+            return Err(ReleaseArtifactsError::StorageURLHostMissing(
+                "S3 URL is missing host".to_string(),
+            ))
+        }
     }
     let bucket_path = if s3_url.path().is_empty() {
         None
@@ -331,7 +335,7 @@ mod tests {
         let error = parse_s3_url("s3:///sub/path").expect_err("should not parse the URL");
         assert!(matches!(
             error,
-            ReleaseArtifactsError::StorageURLHostMissing
+            ReleaseArtifactsError::StorageURLHostMissing(_)
         ));
     }
 

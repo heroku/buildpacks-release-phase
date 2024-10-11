@@ -5,7 +5,7 @@ pub enum ReleaseArtifactsError {
     ConfigMissing(String),
     StorageError(String),
     StorageURLInvalid(url::ParseError),
-    StorageURLHostMissing,
+    StorageURLHostMissing(String),
 }
 
 impl<T: aws_sdk_s3::error::ProvideErrorMetadata> From<T> for ReleaseArtifactsError {
