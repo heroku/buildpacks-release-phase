@@ -120,7 +120,7 @@ pub fn parse_s3_url(
     let bucket_path = if s3_url.path().is_empty() {
         None
     } else {
-        Some(s3_url.path().to_string())
+        Some(s3_url.path().trim_start_matches('/').to_string())
     };
     Ok((bucket_name, bucket_region, bucket_path))
 }
@@ -310,13 +310,13 @@ mod tests {
                 .expect("should parse the URL");
         assert_eq!(bucket_name, "test-bucket".to_string());
         assert_eq!(bucket_region, Some("us-west-2".to_string()));
-        assert_eq!(bucket_path, Some("/sub/path".to_string()));
+        assert_eq!(bucket_path, Some("sub/path".to_string()));
 
         let (bucket_name, bucket_region, bucket_path) =
             parse_s3_url("s3://test-bare-name/sub/path").expect("should parse the URL");
         assert_eq!(bucket_name, "test-bare-name".to_string());
         assert_eq!(bucket_region, None);
-        assert_eq!(bucket_path, Some("/sub/path".to_string()));
+        assert_eq!(bucket_path, Some("sub/path".to_string()));
 
         let (bucket_name, bucket_region, bucket_path) =
             parse_s3_url("s3://test-bucket.s3.us-west-2.amazonaws.com")
