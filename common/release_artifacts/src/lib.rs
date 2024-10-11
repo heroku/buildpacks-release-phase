@@ -134,7 +134,7 @@ pub fn create_archive(
     // add to root of archive
     tar.append_dir_all("", source_dir)
         .map_err(ReleaseArtifactsError::ArchiveError)?;
-    Ok(())
+    tar.finish().map_err(ReleaseArtifactsError::ArchiveError)
 }
 
 /// Decompresses and untars a given .tar.gz file to the given directory.
