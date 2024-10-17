@@ -7,6 +7,7 @@ use regex::Regex;
 use std::{
     collections::HashMap,
     fs::{self, File},
+    hash::BuildHasher,
     io::Write,
     path::Path,
 };
@@ -19,37 +20,31 @@ use url::Url;
 use tokio as _;
 use uuid::{self as _, Uuid};
 
-pub async fn upload<S: ::std::hash::BuildHasher>(
+pub async fn upload<S: BuildHasher>(
     env: &HashMap<String, String, S>,
     dir: &Path,
 ) -> Result<(), ReleaseArtifactsError> {
     guard(env)?;
-
-    let archive_name = format!("{}.tgz", env["RELEASE_ID"]);
+    let archive_name = generate_archive_name::<S>(env);
     create_archive(dir, Path::new(archive_name.as_str()))?;
-
-    let (bucket_name, bucket_region, bucket_path) = parse_s3_url(&env["STATIC_ARTIFACTS_URL"])?;
-    let bucket_key =
-        bucket_path.map_or_else(|| archive_name.clone(), |p| format!("{p}/{archive_name}"));
-
-    let credentials = Credentials::new(
-        env["STATIC_ARTIFACTS_AWS_ACCESS_KEY_ID"].clone(),
-        env["STATIC_ARTIFACTS_AWS_SECRET_ACCESS_KEY"].clone(),
-        None,
-        None,
-        "Static Artifacts storage",
-    );
-    let region_provider = RegionProviderChain::first_try(bucket_region.map(Region::new))
-        .or_else(Region::new("us-east-1"));
-    let shared_config = aws_config::from_env()
-        .region(region_provider)
-        .credentials_provider(credentials)
-        .load()
-        .await;
-    let s3 = Client::new(&shared_config);
+    let (bucket_name, bucket_region, bucket_key) = generate_storage_location(env, &archive_name)?;
+    let s3 = generate_s3_client(env, bucket_region).await;
 
     eprintln!("upload-release-artifacts putting archive: {archive_name}");
     upload_with_client(&s3, &bucket_name, &bucket_key, &archive_name).await
+}
+
+pub async fn download<S: BuildHasher>(
+    env: &HashMap<String, String, S>,
+    dir: &Path,
+) -> Result<(), ReleaseArtifactsError> {
+    guard(env)?;
+    let archive_name = generate_archive_name::<S>(env);
+    let (bucket_name, bucket_region, bucket_key) = generate_storage_location(env, &archive_name)?;
+    let s3 = generate_s3_client(env, bucket_region).await;
+
+    eprintln!("download-release-artifacts getting archive: {archive_name}");
+    download_specific_or_latest_with_client(&s3, &bucket_name, &bucket_key, dir).await
 }
 
 pub async fn upload_with_client(
@@ -76,12 +71,13 @@ pub async fn download_specific_or_latest_with_client(
     s3: &aws_sdk_s3::Client,
     bucket_name: &String,
     bucket_key: &String,
-    destination_dir: &String,
+    destination_dir: &Path,
 ) -> Result<(), ReleaseArtifactsError> {
     match download_with_client(s3, bucket_name, bucket_key, destination_dir).await {
         Ok(()) => Ok(()),
         Err(e) => match e {
             ReleaseArtifactsError::StorageKeyNotFound(_) => {
+                eprintln!("download-release-artifacts specific artifact not found, instead getting latest artifact");
                 let key_parts = bucket_key.split('/');
                 let key_prefix_size = key_parts.clone().count() - 1;
                 let key_prefix_parts: Vec<&str> = key_parts.clone().take(key_prefix_size).collect();
@@ -99,7 +95,7 @@ pub async fn download_specific_or_latest_with_client(
                         download_with_client(s3, bucket_name, &latest_key, destination_dir).await
                     }
                     None => Err(ReleaseArtifactsError::StorageKeyNotFound(format!(
-                        "Latest Not Found: empty list result for bucket '{bucket_name}' prefix '{key_prefix}'"
+                        "Nothing found in bucket '{bucket_name}' prefix '{key_prefix}'"
                     ))),
                 }
             }
@@ -112,7 +108,7 @@ pub async fn download_with_client(
     s3: &aws_sdk_s3::Client,
     bucket_name: &String,
     bucket_key: &String,
-    destination_dir: &String,
+    destination_dir: &Path,
 ) -> Result<(), ReleaseArtifactsError> {
     let output = s3
         .get_object()
@@ -150,7 +146,7 @@ pub async fn download_with_client(
             )
         })?;
 
-    extract_archive(temp_archive_path, Path::new(destination_dir.as_str()))?;
+    extract_archive(temp_archive_path, destination_dir)?;
     fs::remove_file(temp_archive_path).map_err(|e| {
         ReleaseArtifactsError::ArchiveError(
             e,
@@ -189,7 +185,7 @@ pub async fn find_latest_with_client(
     Ok(latest_key)
 }
 
-pub fn guard<S: ::std::hash::BuildHasher>(
+fn guard<S: ::std::hash::BuildHasher>(
     env: &HashMap<String, String, S>,
 ) -> Result<(), ReleaseArtifactsError> {
     let mut messages: Vec<String> = vec![];
@@ -209,6 +205,52 @@ pub fn guard<S: ::std::hash::BuildHasher>(
         return Err(ReleaseArtifactsError::ConfigMissing(messages.join(". ")));
     }
     Ok(())
+}
+
+fn generate_archive_name<S: BuildHasher>(env: &HashMap<String, String, S>) -> String {
+    let release_id = env
+        .get("RELEASE_ID")
+        .map_or(String::default(), std::borrow::ToOwned::to_owned);
+    if release_id.is_empty() {
+        let unique = Uuid::new_v4();
+        format!("artifact-{unique}.tgz")
+    } else {
+        format!("release-{release_id}.tgz")
+    }
+}
+
+fn generate_storage_location<S: BuildHasher>(
+    env: &HashMap<String, String, S>,
+    archive_name: &String,
+) -> Result<(String, Option<String>, String), ReleaseArtifactsError> {
+    let (bucket_name, bucket_region_from_url, bucket_path) =
+        parse_s3_url(&env["STATIC_ARTIFACTS_URL"])?;
+    let bucket_region =
+        bucket_region_from_url.or_else(|| env.get("STATIC_ARTIFACTS_REGION").cloned());
+    let bucket_key =
+        bucket_path.map_or_else(|| archive_name.clone(), |p| format!("{p}/{archive_name}"));
+    Ok((bucket_name, bucket_region, bucket_key))
+}
+
+async fn generate_s3_client<S: BuildHasher>(
+    env: &HashMap<String, String, S>,
+    bucket_region: Option<String>,
+) -> Client {
+    let credentials = Credentials::new(
+        env["STATIC_ARTIFACTS_AWS_ACCESS_KEY_ID"].clone(),
+        env["STATIC_ARTIFACTS_AWS_SECRET_ACCESS_KEY"].clone(),
+        None,
+        None,
+        "Static Artifacts storage",
+    );
+    let region_provider = RegionProviderChain::first_try(bucket_region.map(Region::new))
+        .or_else(Region::new("us-east-1"));
+    let shared_config = aws_config::from_env()
+        .region(region_provider)
+        .credentials_provider(credentials)
+        .load()
+        .await;
+    Client::new(&shared_config)
 }
 
 pub fn parse_s3_url(
@@ -244,7 +286,13 @@ pub fn parse_s3_url(
     let bucket_path = if s3_url.path().is_empty() {
         None
     } else {
-        Some(s3_url.path().trim_start_matches('/').to_string())
+        Some(
+            s3_url
+                .path()
+                .trim_start_matches('/')
+                .trim_end_matches('/')
+                .to_string(),
+        )
     };
     Ok((bucket_name, bucket_region, bucket_path))
 }
@@ -322,7 +370,8 @@ mod tests {
 
     use crate::{
         create_archive, download_specific_or_latest_with_client, download_with_client,
-        errors::ReleaseArtifactsError, extract_archive, find_latest_with_client, guard,
+        errors::ReleaseArtifactsError, extract_archive, find_latest_with_client,
+        generate_archive_name, generate_s3_client, generate_storage_location, guard,
         make_s3_test_credentials, parse_s3_url, upload_with_client,
     };
 
@@ -364,8 +413,9 @@ mod tests {
     #[tokio::test]
     async fn download_specific_or_latest_with_client_specific_succeeds() {
         let unique = Uuid::new_v4();
-        let output_dir = format!("test-output-static-artifacts-{unique}");
-        fs::remove_dir_all(&output_dir).unwrap_or_default();
+        let output_dir_name = format!("test-output-static-artifacts-{unique}");
+        let output_dir = Path::new(output_dir_name.as_str());
+        fs::remove_dir_all(output_dir).unwrap_or_default();
 
         let get_object_1 = ReplayEvent::new(
             http::Request::builder()
@@ -392,25 +442,26 @@ mod tests {
             &s3,
             &"test-bucket".to_string(),
             &"sub/path/static-artifacts.tgz".to_string(),
-            &output_dir,
+            output_dir,
         )
         .await;
 
         println!("{result:#?}");
         assert!(result.is_ok());
         replay_client.assert_requests_match(&[]);
-        assert!(fs::metadata(&output_dir).is_ok());
-        assert!(fs::metadata(output_dir.to_string() + "/index.html").is_ok());
-        assert!(fs::metadata(output_dir.to_string() + "/images").is_ok());
-        assert!(fs::metadata(output_dir.to_string() + "/images/desktop-heroku-pride.jpg").is_ok());
-        fs::remove_dir_all(&output_dir).expect("temporary directory should be deleted");
+        assert!(fs::metadata(output_dir).is_ok());
+        assert!(fs::metadata(output_dir.join("index.html")).is_ok());
+        assert!(fs::metadata(output_dir.join("images")).is_ok());
+        assert!(fs::metadata(output_dir.join("images/desktop-heroku-pride.jpg")).is_ok());
+        fs::remove_dir_all(output_dir).expect("temporary directory should be deleted");
     }
 
     #[tokio::test]
     async fn download_specific_or_latest_with_client_specific_no_prefix_succeeds() {
         let unique = Uuid::new_v4();
-        let output_dir = format!("test-output-static-artifacts-{unique}");
-        fs::remove_dir_all(&output_dir).unwrap_or_default();
+        let output_dir_name = format!("test-output-static-artifacts-{unique}");
+        let output_dir = Path::new(output_dir_name.as_str());
+        fs::remove_dir_all(output_dir).unwrap_or_default();
 
         let get_object_1 = ReplayEvent::new(
             http::Request::builder()
@@ -437,25 +488,26 @@ mod tests {
             &s3,
             &"test-bucket".to_string(),
             &"static-artifacts.tgz".to_string(),
-            &output_dir,
+            output_dir,
         )
         .await;
 
         println!("{result:#?}");
         assert!(result.is_ok());
         replay_client.assert_requests_match(&[]);
-        assert!(fs::metadata(&output_dir).is_ok());
-        assert!(fs::metadata(output_dir.to_string() + "/index.html").is_ok());
-        assert!(fs::metadata(output_dir.to_string() + "/images").is_ok());
-        assert!(fs::metadata(output_dir.to_string() + "/images/desktop-heroku-pride.jpg").is_ok());
-        fs::remove_dir_all(&output_dir).expect("temporary directory should be deleted");
+        assert!(fs::metadata(output_dir).is_ok());
+        assert!(fs::metadata(output_dir.join("index.html")).is_ok());
+        assert!(fs::metadata(output_dir.join("images")).is_ok());
+        assert!(fs::metadata(output_dir.join("images/desktop-heroku-pride.jpg")).is_ok());
+        fs::remove_dir_all(output_dir).expect("temporary directory should be deleted");
     }
 
     #[tokio::test]
     async fn download_specific_or_latest_with_client_latest_succeeds() {
         let unique = Uuid::new_v4();
-        let output_dir = format!("test-output-static-artifacts-{unique}");
-        fs::remove_dir_all(&output_dir).unwrap_or_default();
+        let output_dir_name = format!("test-output-static-artifacts-{unique}");
+        let output_dir = Path::new(output_dir_name.as_str());
+        fs::remove_dir_all(output_dir).unwrap_or_default();
 
         let get_object_1 = ReplayEvent::new(
             http::Request::builder()
@@ -484,15 +536,15 @@ mod tests {
                     <ListBucketResult>
                         <IsTruncated>false</IsTruncated>
                         <Contents>
-                            <Key>v100.zip</Key>
+                            <Key>v100.tgz</Key>
                             <LastModified>2024-07-01T12:20:47.000Z</LastModified>
                         </Contents>
                         <Contents>
-                            <Key>v102.zip</Key>
+                            <Key>v102.tgz</Key>
                             <LastModified>2024-07-04T04:51:50.000Z</LastModified>
                         </Contents>
                         <Contents>
-                            <Key>v101.zip</Key>
+                            <Key>v101.tgz</Key>
                             <LastModified>2024-07-01T19:40:05.000Z</LastModified>
                         </Contents>
                     </ListBucketResult>",
@@ -502,7 +554,7 @@ mod tests {
         let get_object_2 = ReplayEvent::new(
             http::Request::builder()
                 .method("GET")
-                .uri("https://test-bucket.s3.us-east-1.amazonaws.com/sub/path/v102.zip?x-id=GetObject")
+                .uri("https://test-bucket.s3.us-east-1.amazonaws.com/sub/path/v102.tgz?x-id=GetObject")
                 .body(SdkBody::empty())
                 .unwrap(),
             http::Response::builder()
@@ -525,25 +577,26 @@ mod tests {
             &s3,
             &"test-bucket".to_string(),
             &"sub/path/static-artifacts.tgz".to_string(),
-            &output_dir,
+            output_dir,
         )
         .await;
 
         println!("{result:#?}");
         assert!(result.is_ok());
         replay_client.assert_requests_match(&[]);
-        assert!(fs::metadata(&output_dir).is_ok());
-        assert!(fs::metadata(output_dir.to_string() + "/index.html").is_ok());
-        assert!(fs::metadata(output_dir.to_string() + "/images").is_ok());
-        assert!(fs::metadata(output_dir.to_string() + "/images/desktop-heroku-pride.jpg").is_ok());
-        fs::remove_dir_all(&output_dir).expect("temporary directory should be deleted");
+        assert!(fs::metadata(output_dir).is_ok());
+        assert!(fs::metadata(output_dir.join("index.html")).is_ok());
+        assert!(fs::metadata(output_dir.join("images")).is_ok());
+        assert!(fs::metadata(output_dir.join("images/desktop-heroku-pride.jpg")).is_ok());
+        fs::remove_dir_all(output_dir).expect("temporary directory should be deleted");
     }
 
     #[tokio::test]
     async fn download_specific_or_latest_with_client_latest_no_prefix_succeeds() {
         let unique = Uuid::new_v4();
-        let output_dir = format!("test-output-static-artifacts-{unique}");
-        fs::remove_dir_all(&output_dir).unwrap_or_default();
+        let output_dir_name = format!("test-output-static-artifacts-{unique}");
+        let output_dir = Path::new(output_dir_name.as_str());
+        fs::remove_dir_all(output_dir).unwrap_or_default();
 
         let get_object_1 = ReplayEvent::new(
             http::Request::builder()
@@ -573,15 +626,15 @@ mod tests {
                     <ListBucketResult>
                         <IsTruncated>false</IsTruncated>
                         <Contents>
-                            <Key>v100.zip</Key>
+                            <Key>v100.tgz</Key>
                             <LastModified>2024-07-01T12:20:47.000Z</LastModified>
                         </Contents>
                         <Contents>
-                            <Key>v102.zip</Key>
+                            <Key>v102.tgz</Key>
                             <LastModified>2024-07-04T04:51:50.000Z</LastModified>
                         </Contents>
                         <Contents>
-                            <Key>v101.zip</Key>
+                            <Key>v101.tgz</Key>
                             <LastModified>2024-07-01T19:40:05.000Z</LastModified>
                         </Contents>
                     </ListBucketResult>",
@@ -591,7 +644,7 @@ mod tests {
         let get_object_2 = ReplayEvent::new(
             http::Request::builder()
                 .method("GET")
-                .uri("https://test-bucket.s3.us-east-1.amazonaws.com/v102.zip?x-id=GetObject")
+                .uri("https://test-bucket.s3.us-east-1.amazonaws.com/v102.tgz?x-id=GetObject")
                 .body(SdkBody::empty())
                 .unwrap(),
             http::Response::builder()
@@ -614,25 +667,26 @@ mod tests {
             &s3,
             &"test-bucket".to_string(),
             &"static-artifacts.tgz".to_string(),
-            &output_dir,
+            output_dir,
         )
         .await;
 
         println!("{result:#?}");
         assert!(result.is_ok());
         replay_client.assert_requests_match(&[]);
-        assert!(fs::metadata(&output_dir).is_ok());
-        assert!(fs::metadata(output_dir.to_string() + "/index.html").is_ok());
-        assert!(fs::metadata(output_dir.to_string() + "/images").is_ok());
-        assert!(fs::metadata(output_dir.to_string() + "/images/desktop-heroku-pride.jpg").is_ok());
-        fs::remove_dir_all(&output_dir).expect("temporary directory should be deleted");
+        assert!(fs::metadata(output_dir).is_ok());
+        assert!(fs::metadata(output_dir.join("index.html")).is_ok());
+        assert!(fs::metadata(output_dir.join("images")).is_ok());
+        assert!(fs::metadata(output_dir.join("images/desktop-heroku-pride.jpg")).is_ok());
+        fs::remove_dir_all(output_dir).expect("temporary directory should be deleted");
     }
 
     #[tokio::test]
     async fn download_specific_or_latest_with_client_latest_empty() {
         let unique = Uuid::new_v4();
-        let output_dir = format!("test-output-static-artifacts-{unique}");
-        fs::remove_dir_all(&output_dir).unwrap_or_default();
+        let output_dir_name = format!("test-output-static-artifacts-{unique}");
+        let output_dir = Path::new(output_dir_name.as_str());
+        fs::remove_dir_all(output_dir).unwrap_or_default();
 
         let get_object_1 = ReplayEvent::new(
             http::Request::builder()
@@ -678,21 +732,22 @@ mod tests {
             &s3,
             &"test-bucket".to_string(),
             &"sub/path/static-artifacts.tgz".to_string(),
-            &output_dir,
+            output_dir,
         )
         .await;
 
         println!("{result:#?}");
         assert!(result.is_err());
         replay_client.assert_requests_match(&[]);
-        assert!(fs::metadata(&output_dir).is_err());
+        assert!(fs::metadata(output_dir).is_err());
     }
 
     #[tokio::test]
     async fn download_specific_or_latest_with_client_latest_no_prefix_empty() {
         let unique = Uuid::new_v4();
-        let output_dir = format!("test-output-static-artifacts-{unique}");
-        fs::remove_dir_all(&output_dir).unwrap_or_default();
+        let output_dir_name = format!("test-output-static-artifacts-{unique}");
+        let output_dir = Path::new(output_dir_name.as_str());
+        fs::remove_dir_all(output_dir).unwrap_or_default();
 
         let get_object_1 = ReplayEvent::new(
             http::Request::builder()
@@ -739,21 +794,22 @@ mod tests {
             &s3,
             &"test-bucket".to_string(),
             &"static-artifacts.tgz".to_string(),
-            &output_dir,
+            output_dir,
         )
         .await;
 
         println!("{result:#?}");
         assert!(result.is_err());
         replay_client.assert_requests_match(&[]);
-        assert!(fs::metadata(&output_dir).is_err());
+        assert!(fs::metadata(output_dir).is_err());
     }
 
     #[tokio::test]
     async fn download_with_client_succeeds() {
         let unique = Uuid::new_v4();
-        let output_dir = format!("test-output-static-artifacts-{unique}");
-        fs::remove_dir_all(&output_dir).unwrap_or_default();
+        let output_dir_name = format!("test-output-static-artifacts-{unique}");
+        let output_dir = Path::new(output_dir_name.as_str());
+        fs::remove_dir_all(output_dir).unwrap_or_default();
 
         let get_object_1 = ReplayEvent::new(
             http::Request::builder()
@@ -780,17 +836,17 @@ mod tests {
             &s3,
             &"test-bucket".to_string(),
             &"sub/path/static-artifacts.tgz".to_string(),
-            &output_dir,
+            output_dir,
         )
         .await;
 
         assert!(result.is_ok());
         replay_client.assert_requests_match(&[]);
-        assert!(fs::metadata(&output_dir).is_ok());
-        assert!(fs::metadata(output_dir.to_string() + "/index.html").is_ok());
-        assert!(fs::metadata(output_dir.to_string() + "/images").is_ok());
-        assert!(fs::metadata(output_dir.to_string() + "/images/desktop-heroku-pride.jpg").is_ok());
-        fs::remove_dir_all(&output_dir).expect("temporary directory should be deleted");
+        assert!(fs::metadata(output_dir).is_ok());
+        assert!(fs::metadata(output_dir.join("index.html")).is_ok());
+        assert!(fs::metadata(output_dir.join("images")).is_ok());
+        assert!(fs::metadata(output_dir.join("images/desktop-heroku-pride.jpg")).is_ok());
+        fs::remove_dir_all(output_dir).expect("temporary directory should be deleted");
     }
 
     #[tokio::test]
@@ -807,15 +863,15 @@ mod tests {
                     <ListBucketResult>
                         <IsTruncated>false</IsTruncated>
                         <Contents>
-                            <Key>v100.zip</Key>
+                            <Key>v100.tgz</Key>
                             <LastModified>2024-07-01T12:20:47.000Z</LastModified>
                         </Contents>
                         <Contents>
-                            <Key>v102.zip</Key>
+                            <Key>v102.tgz</Key>
                             <LastModified>2024-07-04T04:51:50.000Z</LastModified>
                         </Contents>
                         <Contents>
-                            <Key>v101.zip</Key>
+                            <Key>v101.tgz</Key>
                             <LastModified>2024-07-01T19:40:05.000Z</LastModified>
                         </Contents>
                     </ListBucketResult>",
@@ -841,7 +897,7 @@ mod tests {
         replay_client.assert_requests_match(&[]);
         assert!(result
             .expect("should be ok")
-            .is_some_and(|f| f == "v102.zip"));
+            .is_some_and(|f| f == "v102.tgz"));
     }
 
     #[tokio::test]
@@ -972,6 +1028,170 @@ mod tests {
 
         let result = guard(&test_env);
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn generate_archive_name_with_release_id() {
+        let mut test_env = HashMap::new();
+        test_env.insert("RELEASE_ID".to_string(), "xxxxx".to_string());
+        let result = generate_archive_name(&test_env);
+        assert_eq!(result, "release-xxxxx.tgz".to_string());
+    }
+
+    #[test]
+    #[allow(clippy::case_sensitive_file_extension_comparisons)]
+    fn generate_archive_name_without_release_id() {
+        let test_env = HashMap::new();
+
+        let result = generate_archive_name(&test_env);
+        assert!(result.starts_with("artifact-"));
+        assert!(result.ends_with(".tgz"));
+    }
+
+    #[test]
+    fn generate_storage_location_without_path_in_url() {
+        let mut test_env = HashMap::new();
+        test_env.insert("STATIC_ARTIFACTS_URL".to_string(), "s3://xxxxx".to_string());
+        let test_name = String::from("test-name.tgz");
+
+        let result = generate_storage_location(&test_env, &test_name);
+        println!("{result:#?}");
+        assert!(result.is_ok());
+        assert_eq!(
+            result.expect("result is ok"),
+            ("xxxxx".to_string(), None, "test-name.tgz".to_string())
+        );
+    }
+
+    #[test]
+    fn generate_storage_location_without_region() {
+        let mut test_env = HashMap::new();
+        test_env.insert(
+            "STATIC_ARTIFACTS_URL".to_string(),
+            "s3://xxxxx/yyyyy".to_string(),
+        );
+        let test_name = String::from("test-name.tgz");
+
+        let result = generate_storage_location(&test_env, &test_name);
+        println!("{result:#?}");
+        assert!(result.is_ok());
+        assert_eq!(
+            result.expect("result is ok"),
+            ("xxxxx".to_string(), None, "yyyyy/test-name.tgz".to_string())
+        );
+    }
+
+    #[test]
+    fn generate_storage_location_with_region_in_url() {
+        let mut test_env = HashMap::new();
+        test_env.insert(
+            "STATIC_ARTIFACTS_URL".to_string(),
+            "s3://xxxxx.s3.us-west-2.amazonaws.com/yyyyy".to_string(),
+        );
+        let test_name = String::from("test-name.tgz");
+
+        let result = generate_storage_location(&test_env, &test_name);
+        println!("{result:#?}");
+        assert!(result.is_ok());
+        assert_eq!(
+            result.expect("result is ok"),
+            (
+                "xxxxx".to_string(),
+                Some("us-west-2".to_string()),
+                "yyyyy/test-name.tgz".to_string()
+            )
+        );
+    }
+
+    #[test]
+    fn generate_storage_location_with_region_in_env() {
+        let mut test_env = HashMap::new();
+        test_env.insert(
+            "STATIC_ARTIFACTS_URL".to_string(),
+            "s3://xxxxx/yyyyy".to_string(),
+        );
+        test_env.insert(
+            "STATIC_ARTIFACTS_REGION".to_string(),
+            "us-east-2".to_string(),
+        );
+        let test_name = String::from("test-name.tgz");
+
+        let result = generate_storage_location(&test_env, &test_name);
+        println!("{result:#?}");
+        assert!(result.is_ok());
+        assert_eq!(
+            result.expect("result is ok"),
+            (
+                "xxxxx".to_string(),
+                Some("us-east-2".to_string()),
+                "yyyyy/test-name.tgz".to_string()
+            )
+        );
+    }
+
+    #[test]
+    fn generate_storage_location_with_region_in_both() {
+        let mut test_env = HashMap::new();
+        test_env.insert(
+            "STATIC_ARTIFACTS_URL".to_string(),
+            "s3://xxxxx.s3.us-west-2.amazonaws.com/yyyyy".to_string(),
+        );
+        test_env.insert(
+            "STATIC_ARTIFACTS_REGION".to_string(),
+            "us-east-2".to_string(),
+        );
+        let test_name = String::from("test-name.tgz");
+
+        let result = generate_storage_location(&test_env, &test_name);
+        println!("{result:#?}");
+        assert!(result.is_ok());
+        assert_eq!(
+            result.expect("result is ok"),
+            (
+                "xxxxx".to_string(),
+                Some("us-west-2".to_string()),
+                "yyyyy/test-name.tgz".to_string()
+            )
+        );
+    }
+
+    #[tokio::test]
+    async fn generate_s3_client_with_region() {
+        let mut test_env = HashMap::new();
+        test_env.insert(
+            "STATIC_ARTIFACTS_AWS_ACCESS_KEY_ID".to_string(),
+            "test-key-id".to_string(),
+        );
+        test_env.insert(
+            "STATIC_ARTIFACTS_AWS_SECRET_ACCESS_KEY".to_string(),
+            "test-key-secret".to_string(),
+        );
+        let test_bucket_region = String::from("us-west-1");
+
+        let result = generate_s3_client(&test_env, Some(test_bucket_region)).await;
+        assert!(result
+            .config()
+            .region()
+            .is_some_and(|r| r.to_string() == "us-west-1"));
+    }
+
+    #[tokio::test]
+    async fn generate_s3_client_without_region() {
+        let mut test_env = HashMap::new();
+        test_env.insert(
+            "STATIC_ARTIFACTS_AWS_ACCESS_KEY_ID".to_string(),
+            "test-key-id".to_string(),
+        );
+        test_env.insert(
+            "STATIC_ARTIFACTS_AWS_SECRET_ACCESS_KEY".to_string(),
+            "test-key-secret".to_string(),
+        );
+
+        let result = generate_s3_client(&test_env, None).await;
+        assert!(result
+            .config()
+            .region()
+            .is_some_and(|r| r.to_string() == "us-east-1"));
     }
 
     #[test]
