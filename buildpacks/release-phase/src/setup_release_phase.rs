@@ -47,6 +47,12 @@ pub(crate) fn setup_release_phase(
     .map_err(ReleasePhaseBuildpackError::CannotInstallCommandExecutor)?;
 
     if commands_config.release_build.is_some() {
+        log_info("  download-release-artifacts");
+        fs::copy(
+            additional_buildpack_binary_path!("download-release-artifacts"),
+            exec_destination.join("download-release-artifacts"),
+        )
+        .map_err(ReleasePhaseBuildpackError::CannotInstallArtifactUploader)?;
         log_info("  upload-release-artifacts");
         fs::copy(
             additional_buildpack_binary_path!("upload-release-artifacts"),

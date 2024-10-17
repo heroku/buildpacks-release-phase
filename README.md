@@ -23,10 +23,10 @@ cargo test -- --include-ignored
 ### Package & Run
 
 ```bash
-cargo libcnb package
+cargo libcnb package --target aarch64-unknown-linux-musl
 
 pack build cnb-release-phase-test \
-  --buildpack packaged/x86_64-unknown-linux-musl/debug/heroku_release-phase \
+  --buildpack packaged/aarch64-unknown-linux-musl/debug/heroku_release-phase \
   --builder heroku/builder:24 \
   --path buildpacks/release-phase/tests/fixtures/project_uses_release_build
 
@@ -35,7 +35,8 @@ docker run -it cnb-release-phase-test bash
   RELEASE_ID=my-test-1 \
   STATIC_ARTIFACTS_AWS_ACCESS_KEY_ID=xxxxx \
   STATIC_ARTIFACTS_AWS_SECRET_ACCESS_KEY=xxxxx \
-  STATIC_ARTIFACTS_URL=s3://xxxxx
+  STATIC_ARTIFACTS_URL=s3://xxxxx \
+  STATIC_ARTIFACTS_REGION=us-east-1
 /workspace$ mkdir -p static-artifacts; echo "Hello static world!" > static-artifacts/note.txt
 /workspace$ upload-release-artifacts static-artifacts/
 ```
