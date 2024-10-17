@@ -110,7 +110,7 @@ pub async fn download_with_client(
     bucket_key: &String,
     destination_dir: &Path,
 ) -> Result<(), ReleaseArtifactsError> {
-    let output = s3
+    let mut output = s3
         .get_object()
         .bucket(bucket_name)
         .key(bucket_key)
@@ -132,19 +132,24 @@ pub async fn download_with_client(
             format!("during download_with_client File::create({temp_archive_path:?})"),
         )
     })?;
-    archive
-        .write_all(
-            output
-                .body()
-                .bytes()
-                .expect("S3 response body should contains bytes"),
-        )
-        .map_err(|e| {
+
+    let mut byte_count = 0_usize;
+    while let Some(bytes) = output
+        .body
+        .try_next()
+        .await
+        .map_err(ReleaseArtifactsError::ArchiveStreamError)?
+    {
+        let bytes_len = bytes.len();
+        archive.write_all(&bytes).map_err(|e| {
             ReleaseArtifactsError::ArchiveError(
                 e,
                 "during download_with_client archive.write_all".to_string(),
             )
         })?;
+        byte_count += bytes_len;
+    }
+    eprintln!("download-release-artifacts received {byte_count}-bytes");
 
     extract_archive(temp_archive_path, destination_dir)?;
     fs::remove_file(temp_archive_path).map_err(|e| {
