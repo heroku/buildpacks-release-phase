@@ -1,9 +1,15 @@
 mod errors;
 
+use aws_smithy_types::DateTime;
 use errors::ReleaseArtifactsError;
 use flate2::{read::GzDecoder, Compression, GzBuilder};
 use regex::Regex;
-use std::{collections::HashMap, fs::File, path::Path};
+use std::{
+    collections::HashMap,
+    fs::{self, File},
+    io::Write,
+    path::Path,
+};
 use tar::Archive;
 
 use aws_config::meta::region::RegionProviderChain;
@@ -11,7 +17,7 @@ use aws_sdk_s3::{config::Credentials, config::Region, Client};
 use url::Url;
 
 use tokio as _;
-use uuid as _;
+use uuid::{self as _, Uuid};
 
 pub async fn upload<S: ::std::hash::BuildHasher>(
     env: &HashMap<String, String, S>,
@@ -20,7 +26,7 @@ pub async fn upload<S: ::std::hash::BuildHasher>(
     guard(env)?;
 
     let archive_name = format!("{}.tgz", env["RELEASE_ID"]);
-    create_archive(dir, &archive_name)?;
+    create_archive(dir, Path::new(archive_name.as_str()))?;
 
     let (bucket_name, bucket_region, bucket_path) = parse_s3_url(&env["STATIC_ARTIFACTS_URL"])?;
     let bucket_key =
@@ -43,14 +49,14 @@ pub async fn upload<S: ::std::hash::BuildHasher>(
     let s3 = Client::new(&shared_config);
 
     eprintln!("upload-release-artifacts putting archive: {archive_name}");
-    upload_with_client(s3, bucket_name, bucket_key, archive_name).await
+    upload_with_client(&s3, &bucket_name, &bucket_key, &archive_name).await
 }
 
 pub async fn upload_with_client(
-    s3: aws_sdk_s3::Client,
-    bucket_name: String,
-    bucket_key: String,
-    archive_name: String,
+    s3: &aws_sdk_s3::Client,
+    bucket_name: &String,
+    bucket_key: &String,
+    archive_name: &String,
 ) -> Result<(), ReleaseArtifactsError> {
     let archive_data =
         aws_sdk_s3::primitives::ByteStream::from_path(std::path::Path::new(&archive_name))
@@ -64,6 +70,123 @@ pub async fn upload_with_client(
         .await
         .map_err(ReleaseArtifactsError::from)?;
     Ok(())
+}
+
+pub async fn download_specific_or_latest_with_client(
+    s3: &aws_sdk_s3::Client,
+    bucket_name: &String,
+    bucket_key: &String,
+    destination_dir: &String,
+) -> Result<(), ReleaseArtifactsError> {
+    match download_with_client(s3, bucket_name, bucket_key, destination_dir).await {
+        Ok(()) => Ok(()),
+        Err(e) => match e {
+            ReleaseArtifactsError::StorageKeyNotFound(_) => {
+                let key_parts = bucket_key.split('/');
+                let key_prefix_size = key_parts.clone().count() - 1;
+                let key_prefix_parts: Vec<&str> = key_parts.clone().take(key_prefix_size).collect();
+                let key_prefix = if key_prefix_parts.is_empty() {
+                    String::new()
+                } else {
+                    key_prefix_parts.join("/") + "/"
+                };
+                let latest_basename = find_latest_with_client(s3, bucket_name, &key_prefix)
+                    .await
+                    .map_err(ReleaseArtifactsError::from)?;
+                match latest_basename {
+                    Some(basename) => {
+                        let latest_key = key_prefix + &basename;
+                        download_with_client(s3, bucket_name, &latest_key, destination_dir).await
+                    }
+                    None => Err(ReleaseArtifactsError::StorageKeyNotFound(format!(
+                        "Latest Not Found: empty list result for bucket '{bucket_name}' prefix '{key_prefix}'"
+                    ))),
+                }
+            }
+            _ => Err(e),
+        },
+    }
+}
+
+pub async fn download_with_client(
+    s3: &aws_sdk_s3::Client,
+    bucket_name: &String,
+    bucket_key: &String,
+    destination_dir: &String,
+) -> Result<(), ReleaseArtifactsError> {
+    let output = s3
+        .get_object()
+        .bucket(bucket_name)
+        .key(bucket_key)
+        .send()
+        .await
+        .map_err(ReleaseArtifactsError::from)?;
+
+    let unique = Uuid::new_v4();
+    let temp_archive_name = format!(
+        "static-artifacts-temp--{}--{}",
+        bucket_key.replace('/', "-"),
+        unique
+    );
+    let temp_archive_path = Path::new(&temp_archive_name);
+
+    let mut archive = File::create(temp_archive_path).map_err(|e| {
+        ReleaseArtifactsError::ArchiveError(
+            e,
+            format!("during download_with_client File::create({temp_archive_path:?})"),
+        )
+    })?;
+    archive
+        .write_all(
+            output
+                .body()
+                .bytes()
+                .expect("S3 response body should contains bytes"),
+        )
+        .map_err(|e| {
+            ReleaseArtifactsError::ArchiveError(
+                e,
+                "during download_with_client archive.write_all".to_string(),
+            )
+        })?;
+
+    extract_archive(temp_archive_path, Path::new(destination_dir.as_str()))?;
+    fs::remove_file(temp_archive_path).map_err(|e| {
+        ReleaseArtifactsError::ArchiveError(
+            e,
+            format!("during download_with_client fs::remove_file({temp_archive_path:?})"),
+        )
+    })?;
+
+    Ok(())
+}
+
+pub async fn find_latest_with_client(
+    s3: &aws_sdk_s3::Client,
+    bucket_name: &String,
+    bucket_key_prefix: &String,
+) -> Result<Option<String>, ReleaseArtifactsError> {
+    let output = s3
+        .list_objects_v2()
+        .bucket(bucket_name)
+        .prefix(bucket_key_prefix)
+        .send()
+        .await
+        .map_err(ReleaseArtifactsError::from)?;
+    let latest_key = output.contents.and_then(|mut c| {
+        if c.is_empty() {
+            return None;
+        }
+        c.sort_by_key(|k| {
+            k.last_modified()
+                .map_or_else(|| DateTime::from_secs(0), std::borrow::ToOwned::to_owned)
+        });
+        c.last()
+            .expect("should have at least one sorted object")
+            .key()
+            .map(std::string::ToString::to_string)
+    });
+    Ok(latest_key)
 }
 
 pub fn guard<S: ::std::hash::BuildHasher>(
@@ -127,31 +250,46 @@ pub fn parse_s3_url(
 }
 
 /// Tars & compresses contents of the given directory to a .tar.gz file.
-pub fn create_archive(
-    source_dir: &Path,
-    destination: impl AsRef<Path>,
-) -> Result<(), ReleaseArtifactsError> {
-    let output_file: File =
-        File::create(destination).map_err(ReleaseArtifactsError::ArchiveError)?;
+pub fn create_archive(source_dir: &Path, destination: &Path) -> Result<(), ReleaseArtifactsError> {
+    let output_file: File = File::create(destination).map_err(|e| {
+        ReleaseArtifactsError::ArchiveError(
+            e,
+            format!("during create_archive File::create({destination:?})"),
+        )
+    })?;
     let gz = GzBuilder::new().write(output_file, Compression::default());
     let mut tar = tar::Builder::new(gz);
     tar.follow_symlinks(false);
     // add to root of archive
-    tar.append_dir_all("", source_dir)
-        .map_err(ReleaseArtifactsError::ArchiveError)?;
-    tar.finish().map_err(ReleaseArtifactsError::ArchiveError)
+    tar.append_dir_all("", source_dir).map_err(|e| {
+        ReleaseArtifactsError::ArchiveError(
+            e,
+            format!("during create_archive tar.append_dir_all({source_dir:?})"),
+        )
+    })?;
+    tar.finish().map_err(|e| {
+        ReleaseArtifactsError::ArchiveError(e, "during create_archive tar.finish()".to_string())
+    })
 }
 
 /// Decompresses and untars a given .tar.gz file to the given directory.
 pub fn extract_archive(
     source_file: &Path,
-    destination: impl AsRef<Path>,
+    destination: &Path,
 ) -> Result<(), ReleaseArtifactsError> {
-    let source = File::open(source_file).map_err(ReleaseArtifactsError::ArchiveError)?;
+    let source = File::open(source_file).map_err(|e| {
+        ReleaseArtifactsError::ArchiveError(
+            e,
+            format!("during extract_archive File::open({source_file:?})"),
+        )
+    })?;
     let mut archive = Archive::new(GzDecoder::new(source));
-    archive
-        .unpack(destination)
-        .map_err(ReleaseArtifactsError::ArchiveError)
+    archive.unpack(destination).map_err(|e| {
+        ReleaseArtifactsError::ArchiveError(
+            e,
+            format!("during extract_archive archive.unpack({destination:?})"),
+        )
+    })
 }
 
 #[allow(dead_code)]
@@ -170,6 +308,7 @@ mod tests {
     use std::{
         collections::HashMap,
         fs::{self, File},
+        io::Read,
         path::Path,
     };
 
@@ -182,24 +321,25 @@ mod tests {
     use aws_smithy_types::body::SdkBody;
 
     use crate::{
-        create_archive, errors::ReleaseArtifactsError, extract_archive, guard,
+        create_archive, download_specific_or_latest_with_client, download_with_client,
+        errors::ReleaseArtifactsError, extract_archive, find_latest_with_client, guard,
         make_s3_test_credentials, parse_s3_url, upload_with_client,
     };
 
     #[tokio::test]
     async fn upload_with_client_succeeds() {
-        let page_1 = ReplayEvent::new(
+        let put_object_1 = ReplayEvent::new(
             http::Request::builder()
                 .method("PUT")
                 .uri("https://test-bucket.s3.us-east-1.amazonaws.com/sub/path/static-artifacts.tgz?x-id=PutObject")
-                .body(SdkBody::empty())
+                .body(SdkBody::empty()) // body must be empty here, because it uses a streamer impl
                 .unwrap(),
             http::Response::builder()
                 .status(200)
                 .body(SdkBody::empty())
                 .unwrap(),
         );
-        let replay_client = StaticReplayClient::new(vec![page_1]);
+        let replay_client = StaticReplayClient::new(vec![put_object_1]);
         let s3 = aws_sdk_s3::Client::from_conf(
             aws_sdk_s3::Config::builder()
                 .behavior_version(BehaviorVersion::latest())
@@ -210,15 +350,545 @@ mod tests {
         );
 
         let result = upload_with_client(
-            s3,
-            "test-bucket".to_string(),
-            "sub/path/static-artifacts.tgz".to_string(),
-            "test/fixtures/static-artifacts.tgz".to_string(),
+            &s3,
+            &"test-bucket".to_string(),
+            &"sub/path/static-artifacts.tgz".to_string(),
+            &"test/fixtures/static-artifacts.tgz".to_string(),
         )
         .await;
 
         assert!(result.is_ok());
         replay_client.assert_requests_match(&[]);
+    }
+
+    #[tokio::test]
+    async fn download_specific_or_latest_with_client_specific_succeeds() {
+        let unique = Uuid::new_v4();
+        let output_dir = format!("test-output-static-artifacts-{unique}");
+        fs::remove_dir_all(&output_dir).unwrap_or_default();
+
+        let get_object_1 = ReplayEvent::new(
+            http::Request::builder()
+                .method("GET")
+                .uri("https://test-bucket.s3.us-east-1.amazonaws.com/sub/path/static-artifacts.tgz?x-id=GetObject")
+                .body(SdkBody::empty())
+                .unwrap(),
+            http::Response::builder()
+                .status(200)
+                .body(SdkBody::from(read_fixture_archive_data()))
+                .unwrap(),
+        );
+        let replay_client = StaticReplayClient::new(vec![get_object_1]);
+        let s3 = aws_sdk_s3::Client::from_conf(
+            aws_sdk_s3::Config::builder()
+                .behavior_version(BehaviorVersion::latest())
+                .credentials_provider(make_s3_test_credentials())
+                .region(aws_sdk_s3::config::Region::new("us-east-1"))
+                .http_client(replay_client.clone())
+                .build(),
+        );
+
+        let result = download_specific_or_latest_with_client(
+            &s3,
+            &"test-bucket".to_string(),
+            &"sub/path/static-artifacts.tgz".to_string(),
+            &output_dir,
+        )
+        .await;
+
+        println!("{result:#?}");
+        assert!(result.is_ok());
+        replay_client.assert_requests_match(&[]);
+        assert!(fs::metadata(&output_dir).is_ok());
+        assert!(fs::metadata(output_dir.to_string() + "/index.html").is_ok());
+        assert!(fs::metadata(output_dir.to_string() + "/images").is_ok());
+        assert!(fs::metadata(output_dir.to_string() + "/images/desktop-heroku-pride.jpg").is_ok());
+        fs::remove_dir_all(&output_dir).expect("temporary directory should be deleted");
+    }
+
+    #[tokio::test]
+    async fn download_specific_or_latest_with_client_specific_no_prefix_succeeds() {
+        let unique = Uuid::new_v4();
+        let output_dir = format!("test-output-static-artifacts-{unique}");
+        fs::remove_dir_all(&output_dir).unwrap_or_default();
+
+        let get_object_1 = ReplayEvent::new(
+            http::Request::builder()
+                .method("GET")
+                .uri("https://test-bucket.s3.us-east-1.amazonaws.com/static-artifacts.tgz?x-id=GetObject")
+                .body(SdkBody::empty())
+                .unwrap(),
+            http::Response::builder()
+                .status(200)
+                .body(SdkBody::from(read_fixture_archive_data()))
+                .unwrap(),
+        );
+        let replay_client = StaticReplayClient::new(vec![get_object_1]);
+        let s3 = aws_sdk_s3::Client::from_conf(
+            aws_sdk_s3::Config::builder()
+                .behavior_version(BehaviorVersion::latest())
+                .credentials_provider(make_s3_test_credentials())
+                .region(aws_sdk_s3::config::Region::new("us-east-1"))
+                .http_client(replay_client.clone())
+                .build(),
+        );
+
+        let result = download_specific_or_latest_with_client(
+            &s3,
+            &"test-bucket".to_string(),
+            &"static-artifacts.tgz".to_string(),
+            &output_dir,
+        )
+        .await;
+
+        println!("{result:#?}");
+        assert!(result.is_ok());
+        replay_client.assert_requests_match(&[]);
+        assert!(fs::metadata(&output_dir).is_ok());
+        assert!(fs::metadata(output_dir.to_string() + "/index.html").is_ok());
+        assert!(fs::metadata(output_dir.to_string() + "/images").is_ok());
+        assert!(fs::metadata(output_dir.to_string() + "/images/desktop-heroku-pride.jpg").is_ok());
+        fs::remove_dir_all(&output_dir).expect("temporary directory should be deleted");
+    }
+
+    #[tokio::test]
+    async fn download_specific_or_latest_with_client_latest_succeeds() {
+        let unique = Uuid::new_v4();
+        let output_dir = format!("test-output-static-artifacts-{unique}");
+        fs::remove_dir_all(&output_dir).unwrap_or_default();
+
+        let get_object_1 = ReplayEvent::new(
+            http::Request::builder()
+                .method("GET")
+                .uri("https://test-bucket.s3.us-east-1.amazonaws.com/sub/path/static-artifacts.tgz?x-id=GetObject")
+                .body(SdkBody::empty())
+                .unwrap(),
+            http::Response::builder()
+                .status(404)
+                .body(SdkBody::from(r"
+                    <Error>
+                        <Code>NoSuchKey</Code>
+                    </Error>",
+                ))
+                .unwrap(),
+        );
+        let list_object_1 = ReplayEvent::new(
+            http::Request::builder()
+                .method("GET")
+                .uri("https://test-bucket.s3.us-east-1.amazonaws.com/?list-type=2&prefix=sub%2Fpath%2F")
+                .body(SdkBody::empty())
+                .unwrap(),
+            http::Response::builder()
+                .status(200)
+                .body(SdkBody::from(r"
+                    <ListBucketResult>
+                        <IsTruncated>false</IsTruncated>
+                        <Contents>
+                            <Key>v100.zip</Key>
+                            <LastModified>2024-07-01T12:20:47.000Z</LastModified>
+                        </Contents>
+                        <Contents>
+                            <Key>v102.zip</Key>
+                            <LastModified>2024-07-04T04:51:50.000Z</LastModified>
+                        </Contents>
+                        <Contents>
+                            <Key>v101.zip</Key>
+                            <LastModified>2024-07-01T19:40:05.000Z</LastModified>
+                        </Contents>
+                    </ListBucketResult>",
+                ))
+                .unwrap(),
+        );
+        let get_object_2 = ReplayEvent::new(
+            http::Request::builder()
+                .method("GET")
+                .uri("https://test-bucket.s3.us-east-1.amazonaws.com/sub/path/v102.zip?x-id=GetObject")
+                .body(SdkBody::empty())
+                .unwrap(),
+            http::Response::builder()
+                .status(200)
+                .body(SdkBody::from(read_fixture_archive_data()))
+                .unwrap(),
+        );
+        let replay_client =
+            StaticReplayClient::new(vec![get_object_1, list_object_1, get_object_2]);
+        let s3 = aws_sdk_s3::Client::from_conf(
+            aws_sdk_s3::Config::builder()
+                .behavior_version(BehaviorVersion::latest())
+                .credentials_provider(make_s3_test_credentials())
+                .region(aws_sdk_s3::config::Region::new("us-east-1"))
+                .http_client(replay_client.clone())
+                .build(),
+        );
+
+        let result = download_specific_or_latest_with_client(
+            &s3,
+            &"test-bucket".to_string(),
+            &"sub/path/static-artifacts.tgz".to_string(),
+            &output_dir,
+        )
+        .await;
+
+        println!("{result:#?}");
+        assert!(result.is_ok());
+        replay_client.assert_requests_match(&[]);
+        assert!(fs::metadata(&output_dir).is_ok());
+        assert!(fs::metadata(output_dir.to_string() + "/index.html").is_ok());
+        assert!(fs::metadata(output_dir.to_string() + "/images").is_ok());
+        assert!(fs::metadata(output_dir.to_string() + "/images/desktop-heroku-pride.jpg").is_ok());
+        fs::remove_dir_all(&output_dir).expect("temporary directory should be deleted");
+    }
+
+    #[tokio::test]
+    async fn download_specific_or_latest_with_client_latest_no_prefix_succeeds() {
+        let unique = Uuid::new_v4();
+        let output_dir = format!("test-output-static-artifacts-{unique}");
+        fs::remove_dir_all(&output_dir).unwrap_or_default();
+
+        let get_object_1 = ReplayEvent::new(
+            http::Request::builder()
+                .method("GET")
+                .uri("https://test-bucket.s3.us-east-1.amazonaws.com/static-artifacts.tgz?x-id=GetObject")
+                .body(SdkBody::empty())
+                .unwrap(),
+            http::Response::builder()
+                .status(404)
+                .body(SdkBody::from(r"
+                    <Error>
+                        <Code>NoSuchKey</Code>
+                    </Error>",
+                ))
+                .unwrap(),
+        );
+        let list_object_1 = ReplayEvent::new(
+            http::Request::builder()
+                .method("GET")
+                .uri("https://test-bucket.s3.us-east-1.amazonaws.com/?list-type=2&prefix=")
+                .body(SdkBody::empty())
+                .unwrap(),
+            http::Response::builder()
+                .status(200)
+                .body(SdkBody::from(
+                    r"
+                    <ListBucketResult>
+                        <IsTruncated>false</IsTruncated>
+                        <Contents>
+                            <Key>v100.zip</Key>
+                            <LastModified>2024-07-01T12:20:47.000Z</LastModified>
+                        </Contents>
+                        <Contents>
+                            <Key>v102.zip</Key>
+                            <LastModified>2024-07-04T04:51:50.000Z</LastModified>
+                        </Contents>
+                        <Contents>
+                            <Key>v101.zip</Key>
+                            <LastModified>2024-07-01T19:40:05.000Z</LastModified>
+                        </Contents>
+                    </ListBucketResult>",
+                ))
+                .unwrap(),
+        );
+        let get_object_2 = ReplayEvent::new(
+            http::Request::builder()
+                .method("GET")
+                .uri("https://test-bucket.s3.us-east-1.amazonaws.com/v102.zip?x-id=GetObject")
+                .body(SdkBody::empty())
+                .unwrap(),
+            http::Response::builder()
+                .status(200)
+                .body(SdkBody::from(read_fixture_archive_data()))
+                .unwrap(),
+        );
+        let replay_client =
+            StaticReplayClient::new(vec![get_object_1, list_object_1, get_object_2]);
+        let s3 = aws_sdk_s3::Client::from_conf(
+            aws_sdk_s3::Config::builder()
+                .behavior_version(BehaviorVersion::latest())
+                .credentials_provider(make_s3_test_credentials())
+                .region(aws_sdk_s3::config::Region::new("us-east-1"))
+                .http_client(replay_client.clone())
+                .build(),
+        );
+
+        let result = download_specific_or_latest_with_client(
+            &s3,
+            &"test-bucket".to_string(),
+            &"static-artifacts.tgz".to_string(),
+            &output_dir,
+        )
+        .await;
+
+        println!("{result:#?}");
+        assert!(result.is_ok());
+        replay_client.assert_requests_match(&[]);
+        assert!(fs::metadata(&output_dir).is_ok());
+        assert!(fs::metadata(output_dir.to_string() + "/index.html").is_ok());
+        assert!(fs::metadata(output_dir.to_string() + "/images").is_ok());
+        assert!(fs::metadata(output_dir.to_string() + "/images/desktop-heroku-pride.jpg").is_ok());
+        fs::remove_dir_all(&output_dir).expect("temporary directory should be deleted");
+    }
+
+    #[tokio::test]
+    async fn download_specific_or_latest_with_client_latest_empty() {
+        let unique = Uuid::new_v4();
+        let output_dir = format!("test-output-static-artifacts-{unique}");
+        fs::remove_dir_all(&output_dir).unwrap_or_default();
+
+        let get_object_1 = ReplayEvent::new(
+            http::Request::builder()
+                .method("GET")
+                .uri("https://test-bucket.s3.us-east-1.amazonaws.com/sub/path/static-artifacts.tgz?x-id=GetObject")
+                .body(SdkBody::empty())
+                .unwrap(),
+            http::Response::builder()
+                .status(404)
+                .body(SdkBody::from(r"
+                    <Error>
+                        <Code>NoSuchKey</Code>
+                    </Error>",
+                ))
+                .unwrap(),
+        );
+        let list_object_1 = ReplayEvent::new(
+            http::Request::builder()
+                .method("GET")
+                .uri("https://test-bucket.s3.us-east-1.amazonaws.com/?list-type=2&prefix=sub%2Fpath%2F")
+                .body(SdkBody::empty())
+                .unwrap(),
+            http::Response::builder()
+                .status(200)
+                .body(SdkBody::from(r"
+                    <ListBucketResult>
+                        <IsTruncated>false</IsTruncated>
+                    </ListBucketResult>",
+                ))
+                .unwrap(),
+        );
+        let replay_client = StaticReplayClient::new(vec![get_object_1, list_object_1]);
+        let s3 = aws_sdk_s3::Client::from_conf(
+            aws_sdk_s3::Config::builder()
+                .behavior_version(BehaviorVersion::latest())
+                .credentials_provider(make_s3_test_credentials())
+                .region(aws_sdk_s3::config::Region::new("us-east-1"))
+                .http_client(replay_client.clone())
+                .build(),
+        );
+
+        let result = download_specific_or_latest_with_client(
+            &s3,
+            &"test-bucket".to_string(),
+            &"sub/path/static-artifacts.tgz".to_string(),
+            &output_dir,
+        )
+        .await;
+
+        println!("{result:#?}");
+        assert!(result.is_err());
+        replay_client.assert_requests_match(&[]);
+        assert!(fs::metadata(&output_dir).is_err());
+    }
+
+    #[tokio::test]
+    async fn download_specific_or_latest_with_client_latest_no_prefix_empty() {
+        let unique = Uuid::new_v4();
+        let output_dir = format!("test-output-static-artifacts-{unique}");
+        fs::remove_dir_all(&output_dir).unwrap_or_default();
+
+        let get_object_1 = ReplayEvent::new(
+            http::Request::builder()
+                .method("GET")
+                .uri("https://test-bucket.s3.us-east-1.amazonaws.com/static-artifacts.tgz?x-id=GetObject")
+                .body(SdkBody::empty())
+                .unwrap(),
+            http::Response::builder()
+                .status(404)
+                .body(SdkBody::from(r"
+                    <Error>
+                        <Code>NoSuchKey</Code>
+                    </Error>",
+                ))
+                .unwrap(),
+        );
+        let list_object_1 = ReplayEvent::new(
+            http::Request::builder()
+                .method("GET")
+                .uri("https://test-bucket.s3.us-east-1.amazonaws.com/?list-type=2&prefix=")
+                .body(SdkBody::empty())
+                .unwrap(),
+            http::Response::builder()
+                .status(200)
+                .body(SdkBody::from(
+                    r"
+                    <ListBucketResult>
+                        <IsTruncated>false</IsTruncated>
+                    </ListBucketResult>",
+                ))
+                .unwrap(),
+        );
+        let replay_client = StaticReplayClient::new(vec![get_object_1, list_object_1]);
+        let s3 = aws_sdk_s3::Client::from_conf(
+            aws_sdk_s3::Config::builder()
+                .behavior_version(BehaviorVersion::latest())
+                .credentials_provider(make_s3_test_credentials())
+                .region(aws_sdk_s3::config::Region::new("us-east-1"))
+                .http_client(replay_client.clone())
+                .build(),
+        );
+
+        let result = download_specific_or_latest_with_client(
+            &s3,
+            &"test-bucket".to_string(),
+            &"static-artifacts.tgz".to_string(),
+            &output_dir,
+        )
+        .await;
+
+        println!("{result:#?}");
+        assert!(result.is_err());
+        replay_client.assert_requests_match(&[]);
+        assert!(fs::metadata(&output_dir).is_err());
+    }
+
+    #[tokio::test]
+    async fn download_with_client_succeeds() {
+        let unique = Uuid::new_v4();
+        let output_dir = format!("test-output-static-artifacts-{unique}");
+        fs::remove_dir_all(&output_dir).unwrap_or_default();
+
+        let get_object_1 = ReplayEvent::new(
+            http::Request::builder()
+                .method("GET")
+                .uri("https://test-bucket.s3.us-east-1.amazonaws.com/sub/path/static-artifacts.tgz?x-id=GetObject")
+                .body(SdkBody::empty())
+                .unwrap(),
+            http::Response::builder()
+                .status(200)
+                .body(SdkBody::from(read_fixture_archive_data()))
+                .unwrap(),
+        );
+        let replay_client = StaticReplayClient::new(vec![get_object_1]);
+        let s3 = aws_sdk_s3::Client::from_conf(
+            aws_sdk_s3::Config::builder()
+                .behavior_version(BehaviorVersion::latest())
+                .credentials_provider(make_s3_test_credentials())
+                .region(aws_sdk_s3::config::Region::new("us-east-1"))
+                .http_client(replay_client.clone())
+                .build(),
+        );
+
+        let result = download_with_client(
+            &s3,
+            &"test-bucket".to_string(),
+            &"sub/path/static-artifacts.tgz".to_string(),
+            &output_dir,
+        )
+        .await;
+
+        assert!(result.is_ok());
+        replay_client.assert_requests_match(&[]);
+        assert!(fs::metadata(&output_dir).is_ok());
+        assert!(fs::metadata(output_dir.to_string() + "/index.html").is_ok());
+        assert!(fs::metadata(output_dir.to_string() + "/images").is_ok());
+        assert!(fs::metadata(output_dir.to_string() + "/images/desktop-heroku-pride.jpg").is_ok());
+        fs::remove_dir_all(&output_dir).expect("temporary directory should be deleted");
+    }
+
+    #[tokio::test]
+    async fn find_latest_with_client_succeeds() {
+        let list_object_1 = ReplayEvent::new(
+            http::Request::builder()
+                .method("GET")
+                .uri("https://test-bucket.s3.us-east-1.amazonaws.com/?list-type=2&prefix=sub%2Fpath%2F")
+                .body(SdkBody::empty())
+                .unwrap(),
+            http::Response::builder()
+                .status(200)
+                .body(SdkBody::from(r"
+                    <ListBucketResult>
+                        <IsTruncated>false</IsTruncated>
+                        <Contents>
+                            <Key>v100.zip</Key>
+                            <LastModified>2024-07-01T12:20:47.000Z</LastModified>
+                        </Contents>
+                        <Contents>
+                            <Key>v102.zip</Key>
+                            <LastModified>2024-07-04T04:51:50.000Z</LastModified>
+                        </Contents>
+                        <Contents>
+                            <Key>v101.zip</Key>
+                            <LastModified>2024-07-01T19:40:05.000Z</LastModified>
+                        </Contents>
+                    </ListBucketResult>",
+                ))
+                .unwrap(),
+        );
+        let replay_client = StaticReplayClient::new(vec![list_object_1]);
+        let s3 = aws_sdk_s3::Client::from_conf(
+            aws_sdk_s3::Config::builder()
+                .behavior_version(BehaviorVersion::latest())
+                .credentials_provider(make_s3_test_credentials())
+                .region(aws_sdk_s3::config::Region::new("us-east-1"))
+                .http_client(replay_client.clone())
+                .build(),
+        );
+
+        let result =
+            find_latest_with_client(&s3, &"test-bucket".to_string(), &"sub/path/".to_string())
+                .await;
+
+        println!("find_latest_with_client_succeeds result {result:#?}");
+        assert!(result.is_ok());
+        replay_client.assert_requests_match(&[]);
+        assert!(result
+            .expect("should be ok")
+            .is_some_and(|f| f == "v102.zip"));
+    }
+
+    #[tokio::test]
+    async fn find_latest_with_client_empty() {
+        let list_object_1 = ReplayEvent::new(
+            http::Request::builder()
+                .method("GET")
+                .uri("https://test-bucket.s3.us-east-1.amazonaws.com/?list-type=2&prefix=sub%2Fpath%2F")
+                .body(SdkBody::empty())
+                .unwrap(),
+            http::Response::builder()
+                .status(200)
+                .body(SdkBody::from(r"
+                    <ListBucketResult>
+                        <IsTruncated>false</IsTruncated>
+                    </ListBucketResult>",
+                ))
+                .unwrap(),
+        );
+        let replay_client = StaticReplayClient::new(vec![list_object_1]);
+        let s3 = aws_sdk_s3::Client::from_conf(
+            aws_sdk_s3::Config::builder()
+                .behavior_version(BehaviorVersion::latest())
+                .credentials_provider(make_s3_test_credentials())
+                .region(aws_sdk_s3::config::Region::new("us-east-1"))
+                .http_client(replay_client.clone())
+                .build(),
+        );
+
+        let result =
+            find_latest_with_client(&s3, &"test-bucket".to_string(), &"sub/path/".to_string())
+                .await;
+
+        println!("find_latest_with_client_succeeds result {result:#?}");
+        assert!(result.is_ok());
+        replay_client.assert_requests_match(&[]);
+        assert!(result.expect("should be ok").is_none());
+    }
+
+    fn read_fixture_archive_data() -> std::vec::Vec<u8> {
+        let mut archive_file = File::open(Path::new("test/fixtures/static-artifacts.tgz"))
+            .expect("test fixture file should exist");
+        let mut archive_data = Vec::new();
+        archive_file
+            .read_to_end(&mut archive_data)
+            .expect("test fixture file should contain bytes");
+        archive_data
     }
 
     #[test]
@@ -349,7 +1019,11 @@ mod tests {
         fs::remove_file(&output_file).unwrap_or_default();
         fs::remove_dir_all(output_path).unwrap_or_default();
 
-        create_archive(Path::new("test/fixtures/static-artifacts"), &output_file).unwrap();
+        create_archive(
+            Path::new("test/fixtures/static-artifacts"),
+            Path::new(output_file.as_str()),
+        )
+        .unwrap();
         let result_metadata = fs::metadata(&output_file).unwrap();
         assert!(result_metadata.is_file());
         let output = File::open(&output_file).unwrap();

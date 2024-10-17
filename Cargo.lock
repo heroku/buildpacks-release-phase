@@ -1962,7 +1962,7 @@ dependencies = [
  "aws-smithy-runtime",
  "aws-smithy-types",
  "flate2",
- "http 0.2.12",
+ "http 1.1.0",
  "regex",
  "tar",
  "tokio",

@@ -1,21 +1,30 @@
 #[derive(Debug)]
 pub enum ReleaseArtifactsError {
-    ArchiveError(std::io::Error),
+    ArchiveError(std::io::Error, String),
     ArchiveStreamError(aws_sdk_s3::primitives::ByteStreamError),
     ConfigMissing(String),
     StorageError(String),
+    StorageKeyNotFound(String),
     StorageURLInvalid(url::ParseError),
     StorageURLHostMissing(String),
 }
 
-impl<T: aws_sdk_s3::error::ProvideErrorMetadata> From<T> for ReleaseArtifactsError {
+impl<T: std::error::Error + aws_sdk_s3::error::ProvideErrorMetadata> From<T>
+    for ReleaseArtifactsError
+{
     fn from(value: T) -> Self {
-        ReleaseArtifactsError::StorageError(format!(
-            "{}: {}",
-            value.code().map_or("unknown code".into(), String::from),
-            value
-                .message()
-                .map_or("missing reason".into(), String::from),
-        ))
+        match value.code() {
+            Some(code) => match code {
+                "NoSuchKey" => ReleaseArtifactsError::StorageKeyNotFound("Not Found".to_string()),
+                _ => ReleaseArtifactsError::StorageError(format!(
+                    "{code}: {}",
+                    value.message().map_or("(no message)".into(), String::from)
+                )),
+            },
+            _ => ReleaseArtifactsError::StorageError(format!(
+                "{}",
+                aws_smithy_types::error::display::DisplayErrorContext(value)
+            )),
+        }
     }
 }
