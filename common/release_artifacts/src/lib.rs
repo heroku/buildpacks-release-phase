@@ -29,14 +29,8 @@ pub async fn save<S: BuildHasher>(
             guard_file(env)?;
             let archive_name = generate_archive_name::<S>(env);
             eprintln!("save-release-artifacts writing archive: {archive_name}");
-            create_archive(dir, Path::new(archive_name.as_str()))?;
             let destination_path = generate_file_storage_location(env, &archive_name)?;
-            fs::copy(archive_name, &destination_path).map_err(|e| {
-                ReleaseArtifactsError::ArchiveError(
-                    e,
-                    format!("when copying artifact archive to {destination_path:?}"),
-                )
-            })?;
+            create_archive(dir, &destination_path)?;
             Ok(())
         }
         Ok(scheme) if scheme == *"s3" => {
