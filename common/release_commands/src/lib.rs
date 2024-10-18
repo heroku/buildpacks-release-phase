@@ -225,7 +225,7 @@ mod tests {
                 command: "bash".to_string(),
                 args: Some(vec![
                     "-c".to_string(),
-                    "echo 'Build in Release Phase Buildpack!'".to_string()
+                    "echo 'Build in Release Phase Buildpack!'; mkdir -p /workspace/static-artifacts; echo 'Hello static world!' > /workspace/static-artifacts/note.txt".to_string()
                 ]),
                 source: None,
             })
