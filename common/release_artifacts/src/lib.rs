@@ -20,7 +20,7 @@ use url::Url;
 use tokio as _;
 use uuid::{self as _, Uuid};
 
-pub async fn upload<S: BuildHasher>(
+pub async fn save<S: BuildHasher>(
     env: &HashMap<String, String, S>,
     dir: &Path,
 ) -> Result<(), ReleaseArtifactsError> {
@@ -46,7 +46,7 @@ pub async fn upload<S: BuildHasher>(
                 generate_s3_storage_location(env, &archive_name)?;
             let s3 = generate_s3_client(env, bucket_region).await;
 
-            eprintln!("upload-release-artifacts putting archive: {archive_name}");
+            eprintln!("save-release-artifacts putting archive: {archive_name}");
             upload_with_client(&s3, &bucket_name, &bucket_key, &archive_name).await
         }
         Ok(scheme) => Err(ReleaseArtifactsError::StorageURLUnsupportedScheme(scheme)),
@@ -54,7 +54,7 @@ pub async fn upload<S: BuildHasher>(
     }
 }
 
-pub async fn download<S: BuildHasher>(
+pub async fn load<S: BuildHasher>(
     env: &HashMap<String, String, S>,
     dir: &Path,
 ) -> Result<String, ReleaseArtifactsError> {
@@ -73,7 +73,7 @@ pub async fn download<S: BuildHasher>(
                 generate_s3_storage_location(env, &archive_name)?;
             let s3 = generate_s3_client(env, bucket_region).await;
 
-            eprintln!("download-release-artifacts getting archive: {archive_name}");
+            eprintln!("load-release-artifacts getting archive: {archive_name}");
             download_specific_or_latest_with_client(&s3, &bucket_name, &bucket_key, dir).await
         }
         Ok(scheme) => Err(ReleaseArtifactsError::StorageURLUnsupportedScheme(scheme)),
@@ -111,7 +111,7 @@ pub async fn download_specific_or_latest_with_client(
         Ok(()) => Ok(bucket_key.clone()),
         Err(e) => match e {
             ReleaseArtifactsError::StorageKeyNotFound(_) => {
-                eprintln!("download-release-artifacts specific artifact not found '{bucket_key}', instead getting latest artifact");
+                eprintln!("load-release-artifacts specific artifact not found '{bucket_key}', instead getting latest artifact");
                 let key_parts = bucket_key.split('/');
                 let key_prefix_size = key_parts.clone().count() - 1;
                 let key_prefix_parts: Vec<&str> = key_parts.clone().take(key_prefix_size).collect();
@@ -125,7 +125,9 @@ pub async fn download_specific_or_latest_with_client(
                     .map_err(ReleaseArtifactsError::from)?;
                 match latest_result {
                     Some(latest_bucket_key) => {
-                        eprintln!("download-release-artifacts getting latest artifact '{latest_bucket_key}'");
+                        eprintln!(
+                            "load-release-artifacts getting latest artifact '{latest_bucket_key}'"
+                        );
                         download_with_client(s3, bucket_name, &latest_bucket_key, destination_dir)
                             .await?;
                         Ok(latest_bucket_key.clone())
@@ -185,7 +187,7 @@ pub async fn download_with_client(
         })?;
         byte_count += bytes_len;
     }
-    eprintln!("download-release-artifacts received {byte_count}-bytes");
+    eprintln!("load-release-artifacts received {byte_count}-bytes");
 
     extract_archive(temp_archive_path, destination_dir)?;
     fs::remove_file(temp_archive_path).map_err(|e| {
@@ -456,15 +458,15 @@ mod tests {
     use aws_smithy_types::body::SdkBody;
 
     use crate::{
-        create_archive, detect_storage_scheme, download, download_specific_or_latest_with_client,
+        create_archive, detect_storage_scheme, download_specific_or_latest_with_client,
         download_with_client, errors::ReleaseArtifactsError, extract_archive,
         find_latest_with_client, generate_archive_name, generate_file_storage_location,
-        generate_s3_client, generate_s3_storage_location, guard_file, guard_s3,
-        make_s3_test_credentials, parse_s3_url, upload, upload_with_client,
+        generate_s3_client, generate_s3_storage_location, guard_file, guard_s3, load,
+        make_s3_test_credentials, parse_s3_url, save, upload_with_client,
     };
 
     #[tokio::test]
-    async fn upload_file_url_succeeds() {
+    async fn save_file_url_succeeds() {
         let unique = Uuid::new_v4();
         let output_archive_dir = format!("test-saved-static-artifacts-{unique}");
         let abs_root = env::current_dir().expect("should have a current working directory");
@@ -478,7 +480,7 @@ mod tests {
             format!("file://{}", output_archive_dir_path.to_string_lossy()),
         );
 
-        let result = upload(&test_env, Path::new("test/fixtures/static-artifacts")).await;
+        let result = save(&test_env, Path::new("test/fixtures/static-artifacts")).await;
 
         eprintln!("{result:?}");
         assert!(result.is_ok());
@@ -526,7 +528,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn download_file_url_succeeds() {
+    async fn load_file_url_succeeds() {
         let unique = Uuid::new_v4();
         let abs_root = env::current_dir().expect("should have a current working directory");
         let source_archive_dir_path = Path::new(&abs_root).join("test/fixtures");
@@ -540,7 +542,7 @@ mod tests {
             format!("file://{}", source_archive_dir_path.to_string_lossy()).to_string(),
         );
 
-        let result = download(&test_env, &destination_dir_path).await;
+        let result = load(&test_env, &destination_dir_path).await;
 
         eprintln!("{result:?}");
         assert!(result.is_ok());

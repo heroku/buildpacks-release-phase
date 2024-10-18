@@ -38,7 +38,7 @@ docker run -it cnb-release-phase-test bash
   STATIC_ARTIFACTS_URL=s3://xxxxx \
   STATIC_ARTIFACTS_REGION=us-east-1
 /workspace$ mkdir -p static-artifacts; echo "Hello static world!" > static-artifacts/note.txt
-/workspace$ upload-release-artifacts static-artifacts/
+/workspace$ save-release-artifacts static-artifacts/
 ```
 
 ### Releasing A New Version

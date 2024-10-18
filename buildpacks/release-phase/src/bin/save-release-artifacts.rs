@@ -3,13 +3,13 @@
 
 use std::{collections::HashMap, env, path::Path};
 
-use release_artifacts::upload;
+use release_artifacts::save;
 
 #[tokio::main]
 async fn main() {
     let args: Vec<String> = env::args().collect();
     if args.len() < 2 {
-        eprintln!("upload-release-artifacts requires argument: the source directory");
+        eprintln!("save-release-artifacts requires argument: the source directory");
         std::process::exit(1);
     }
     let source_dir = Path::new(&args[1]);
@@ -21,13 +21,13 @@ async fn main() {
         }
     }
 
-    match upload(&env, source_dir).await {
+    match save(&env, source_dir).await {
         Ok(()) => {
-            eprintln!("upload-release-artifacts complete.");
+            eprintln!("save-release-artifacts complete.");
             std::process::exit(0);
         }
         Err(error) => {
-            eprintln!("upload-release-artifacts failed: {error:#?}");
+            eprintln!("save-release-artifacts failed: {error:#?}");
             std::process::exit(1);
         }
     }

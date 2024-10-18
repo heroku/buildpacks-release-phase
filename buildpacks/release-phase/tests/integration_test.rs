@@ -36,7 +36,7 @@ fn project_uses_release_build() {
             // This error is expected because we are not integrating with AWS S3 in this test.
             assert_contains!(
                 log_output.stderr,
-                "upload-release-artifacts failed: ConfigMissing"
+                "save-release-artifacts failed: ConfigMissing"
             );
         });
     });

@@ -48,24 +48,24 @@ pub(crate) fn setup_release_phase(
     .map_err(ReleasePhaseBuildpackError::CannotInstallCommandExecutor)?;
 
     if commands_config.release_build.is_some() {
-        let upload_exec = exec_destination.join("upload-release-artifacts");
-        log_info(format!("  {upload_exec:?}"));
+        let save_exec = exec_destination.join("save-release-artifacts");
+        log_info(format!("  {save_exec:?}"));
         fs::copy(
-            additional_buildpack_binary_path!("upload-release-artifacts"),
-            upload_exec,
+            additional_buildpack_binary_path!("save-release-artifacts"),
+            save_exec,
         )
-        .map_err(ReleasePhaseBuildpackError::CannotInstallArtifactUploader)?;
+        .map_err(ReleasePhaseBuildpackError::CannotInstallArtifactSaver)?;
 
         let web_exec_destination = release_phase_layer.path().join("exec.d/web");
-        let download_exec = web_exec_destination.join("download-release-artifacts");
-        log_info(format!("  {download_exec:?}"));
+        let load_exec = web_exec_destination.join("load-release-artifacts");
+        log_info(format!("  {load_exec:?}"));
         fs::create_dir_all(&web_exec_destination)
             .map_err(ReleasePhaseBuildpackError::CannotCreatWebExecD)?;
         fs::copy(
-            additional_buildpack_binary_path!("download-release-artifacts"),
-            download_exec,
+            additional_buildpack_binary_path!("load-release-artifacts"),
+            load_exec,
         )
-        .map_err(ReleasePhaseBuildpackError::CannotInstallArtifactDownloader)?;
+        .map_err(ReleasePhaseBuildpackError::CannotInstallArtifactLoader)?;
     }
 
     Ok(Some(release_phase_layer))

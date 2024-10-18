@@ -131,14 +131,13 @@ pub fn generate_commands_config(project_toml_path: &Path) -> Result<ReleaseComma
         .map_err(Error::TomlProjectDeserializeError)?;
 
     if commands.release_build.is_some() {
-        // Add the uploader as the first release command, immediately after release-build.
-        let upload_helper = Executable {
-            command: "upload-release-artifacts".to_string(),
+        // Add the saver as the first release command, immediately after release-build.
+        let save_exec = Executable {
+            command: "save-release-artifacts".to_string(),
             args: Some(vec!["static-artifacts/".to_string()]),
             source: Some("Heroku Release Phase Buildpack".to_string()),
         };
-        commands.release =
-            Some([vec![upload_helper], commands.release.map_or(vec![], |v| v)].concat());
+        commands.release = Some([vec![save_exec], commands.release.map_or(vec![], |v| v)].concat());
     }
 
     Ok(commands)
@@ -234,7 +233,7 @@ mod tests {
         assert_eq!(
             project_config.release,
             Some(vec![Executable {
-                command: "upload-release-artifacts".to_string(),
+                command: "save-release-artifacts".to_string(),
                 args: Some(vec!["static-artifacts/".to_string()]),
                 source: Some("Heroku Release Phase Buildpack".to_string()),
             }])

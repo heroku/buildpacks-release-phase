@@ -12,8 +12,8 @@ locally with a minimal example and open an issue in the buildpack's GitHub repos
 
 #[derive(Debug)]
 pub(crate) enum ReleasePhaseBuildpackError {
-    CannotInstallArtifactUploader(std::io::Error),
-    CannotInstallArtifactDownloader(std::io::Error),
+    CannotInstallArtifactSaver(std::io::Error),
+    CannotInstallArtifactLoader(std::io::Error),
     CannotInstallCommandExecutor(std::io::Error),
     CannotCreatWebExecD(std::io::Error),
     ConfigurationFailed(release_commands::Error),
@@ -31,18 +31,18 @@ pub(crate) fn on_error(error: libcnb::Error<ReleasePhaseBuildpackError>) {
 
 fn on_buildpack_error(error: ReleasePhaseBuildpackError, logger: Box<dyn StartedLogger>) {
     match error {
-        ReleasePhaseBuildpackError::CannotInstallArtifactUploader(error) => {
+        ReleasePhaseBuildpackError::CannotInstallArtifactSaver(error) => {
             print_error_details(logger, &error)
                 .announce()
                 .error(&formatdoc! {"
-                Cannot install upload-release-artifacts for {buildpack_name}
+                Cannot install save-release-artifacts for {buildpack_name}
             ", buildpack_name = fmt::value(BUILDPACK_NAME) });
         }
-        ReleasePhaseBuildpackError::CannotInstallArtifactDownloader(error) => {
+        ReleasePhaseBuildpackError::CannotInstallArtifactLoader(error) => {
             print_error_details(logger, &error)
                 .announce()
                 .error(&formatdoc! {"
-                Cannot install download-release-artifacts for {buildpack_name}
+                Cannot install load-release-artifacts for {buildpack_name}
             ", buildpack_name = fmt::value(BUILDPACK_NAME) });
         }
         ReleasePhaseBuildpackError::CannotInstallCommandExecutor(error) => {

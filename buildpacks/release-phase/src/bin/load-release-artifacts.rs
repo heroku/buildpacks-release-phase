@@ -7,7 +7,7 @@ use libcnb::data::exec_d::ExecDProgramOutputKey;
 use libcnb::data::exec_d_program_output_key;
 use libcnb::exec_d::write_exec_d_program_output;
 
-use release_artifacts::download;
+use release_artifacts::load;
 
 #[tokio::main]
 async fn main() {
@@ -20,18 +20,18 @@ async fn main() {
         }
     }
 
-    match download(&env, source_dir).await {
-        Ok(downloaded_key) => {
-            eprintln!("download-release-artifacts complete.");
+    match load(&env, source_dir).await {
+        Ok(loaded_key) => {
+            eprintln!("load-release-artifacts complete.");
             let output_env: HashMap<ExecDProgramOutputKey, String> = HashMap::from([(
                 exec_d_program_output_key!("STATIC_ARTIFACTS_LOADED_FROM_KEY"),
-                downloaded_key,
+                loaded_key,
             )]);
             write_exec_d_program_output(output_env);
             std::process::exit(0);
         }
         Err(error) => {
-            eprintln!("download-release-artifacts failed: {error:#?}");
+            eprintln!("load-release-artifacts failed: {error:#?}");
             std::process::exit(1);
         }
     }
