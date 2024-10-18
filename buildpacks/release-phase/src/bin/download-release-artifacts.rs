@@ -3,16 +3,15 @@
 
 use std::{collections::HashMap, env, path::Path};
 
+use libcnb::data::exec_d::ExecDProgramOutputKey;
+use libcnb::data::exec_d_program_output_key;
+use libcnb::exec_d::write_exec_d_program_output;
+
 use release_artifacts::download;
 
 #[tokio::main]
 async fn main() {
-    let args: Vec<String> = env::args().collect();
-    if args.len() < 2 {
-        eprintln!("download-release-artifacts requires argument: the destination directory");
-        std::process::exit(1);
-    }
-    let source_dir = Path::new(&args[1]);
+    let source_dir = Path::new("static-artifacts");
 
     let mut env = HashMap::new();
     for (key, value) in env::vars() {
@@ -22,8 +21,13 @@ async fn main() {
     }
 
     match download(&env, source_dir).await {
-        Ok(()) => {
+        Ok(downloaded_key) => {
             eprintln!("download-release-artifacts complete.");
+            let output_env: HashMap<ExecDProgramOutputKey, String> = HashMap::from([(
+                exec_d_program_output_key!("STATIC_ARTIFACTS_LOADED_FROM_KEY"),
+                downloaded_key,
+            )]);
+            write_exec_d_program_output(output_env);
             std::process::exit(0);
         }
         Err(error) => {

@@ -13,7 +13,9 @@ locally with a minimal example and open an issue in the buildpack's GitHub repos
 #[derive(Debug)]
 pub(crate) enum ReleasePhaseBuildpackError {
     CannotInstallArtifactUploader(std::io::Error),
+    CannotInstallArtifactDownloader(std::io::Error),
     CannotInstallCommandExecutor(std::io::Error),
+    CannotCreatWebExecD(std::io::Error),
     ConfigurationFailed(release_commands::Error),
 }
 
@@ -36,11 +38,25 @@ fn on_buildpack_error(error: ReleasePhaseBuildpackError, logger: Box<dyn Started
                 Cannot install upload-release-artifacts for {buildpack_name}
             ", buildpack_name = fmt::value(BUILDPACK_NAME) });
         }
+        ReleasePhaseBuildpackError::CannotInstallArtifactDownloader(error) => {
+            print_error_details(logger, &error)
+                .announce()
+                .error(&formatdoc! {"
+                Cannot install download-release-artifacts for {buildpack_name}
+            ", buildpack_name = fmt::value(BUILDPACK_NAME) });
+        }
         ReleasePhaseBuildpackError::CannotInstallCommandExecutor(error) => {
             print_error_details(logger, &error)
                 .announce()
                 .error(&formatdoc! {"
                 Cannot install exec-release-commands for {buildpack_name}
+            ", buildpack_name = fmt::value(BUILDPACK_NAME) });
+        }
+        ReleasePhaseBuildpackError::CannotCreatWebExecD(error) => {
+            print_error_details(logger, &error)
+                .announce()
+                .error(&formatdoc! {"
+                Cannot create exec.d/web for {buildpack_name}
             ", buildpack_name = fmt::value(BUILDPACK_NAME) });
         }
         ReleasePhaseBuildpackError::ConfigurationFailed(error) => {
