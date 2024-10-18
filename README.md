@@ -33,8 +33,8 @@ pack build cnb-release-phase-test \
 docker run -it cnb-release-phase-test bash
 /workspace$ export \
   RELEASE_ID=my-test-1 \
-  STATIC_ARTIFACTS_AWS_ACCESS_KEY_ID=xxxxx \
-  STATIC_ARTIFACTS_AWS_SECRET_ACCESS_KEY=xxxxx \
+  STATIC_ARTIFACTS_ACCESS_KEY_ID=xxxxx \
+  STATIC_ARTIFACTS_SECRET_ACCESS_KEY=xxxxx \
   STATIC_ARTIFACTS_URL=s3://xxxxx \
   STATIC_ARTIFACTS_REGION=us-east-1
 /workspace$ mkdir -p static-artifacts; echo "Hello static world!" > static-artifacts/note.txt

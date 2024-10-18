@@ -37,7 +37,7 @@ pub async fn upload<S: BuildHasher>(
 pub async fn download<S: BuildHasher>(
     env: &HashMap<String, String, S>,
     dir: &Path,
-) -> Result<(), ReleaseArtifactsError> {
+) -> Result<String, ReleaseArtifactsError> {
     guard(env)?;
     let archive_name = generate_archive_name::<S>(env);
     let (bucket_name, bucket_region, bucket_key) = generate_storage_location(env, &archive_name)?;
@@ -72,9 +72,9 @@ pub async fn download_specific_or_latest_with_client(
     bucket_name: &String,
     bucket_key: &String,
     destination_dir: &Path,
-) -> Result<(), ReleaseArtifactsError> {
+) -> Result<String, ReleaseArtifactsError> {
     match download_with_client(s3, bucket_name, bucket_key, destination_dir).await {
-        Ok(()) => Ok(()),
+        Ok(()) => Ok(bucket_key.clone()),
         Err(e) => match e {
             ReleaseArtifactsError::StorageKeyNotFound(_) => {
                 eprintln!("download-release-artifacts specific artifact not found '{bucket_key}', instead getting latest artifact");
@@ -93,7 +93,8 @@ pub async fn download_specific_or_latest_with_client(
                     Some(latest_bucket_key) => {
                         eprintln!("download-release-artifacts getting latest artifact '{latest_bucket_key}'");
                         download_with_client(s3, bucket_name, &latest_bucket_key, destination_dir)
-                            .await
+                            .await?;
+                        Ok(latest_bucket_key.clone())
                     }
                     None => Err(ReleaseArtifactsError::StorageKeyNotFound(format!(
                         "Nothing found in bucket '{bucket_name}' prefix '{key_prefix}'"
@@ -198,11 +199,11 @@ fn guard<S: ::std::hash::BuildHasher>(
     if !env.contains_key("RELEASE_ID") {
         messages.push("RELEASE_ID is required".to_string());
     }
-    if !env.contains_key("STATIC_ARTIFACTS_AWS_ACCESS_KEY_ID") {
-        messages.push("STATIC_ARTIFACTS_AWS_ACCESS_KEY_ID is required".to_string());
+    if !env.contains_key("STATIC_ARTIFACTS_ACCESS_KEY_ID") {
+        messages.push("STATIC_ARTIFACTS_ACCESS_KEY_ID is required".to_string());
     }
-    if !env.contains_key("STATIC_ARTIFACTS_AWS_SECRET_ACCESS_KEY") {
-        messages.push("STATIC_ARTIFACTS_AWS_SECRET_ACCESS_KEY is required".to_string());
+    if !env.contains_key("STATIC_ARTIFACTS_SECRET_ACCESS_KEY") {
+        messages.push("STATIC_ARTIFACTS_SECRET_ACCESS_KEY is required".to_string());
     }
     if !env.contains_key("STATIC_ARTIFACTS_URL") {
         messages.push("STATIC_ARTIFACTS_URL is required".to_string());
@@ -243,8 +244,8 @@ async fn generate_s3_client<S: BuildHasher>(
     bucket_region: Option<String>,
 ) -> Client {
     let credentials = Credentials::new(
-        env["STATIC_ARTIFACTS_AWS_ACCESS_KEY_ID"].clone(),
-        env["STATIC_ARTIFACTS_AWS_SECRET_ACCESS_KEY"].clone(),
+        env["STATIC_ARTIFACTS_ACCESS_KEY_ID"].clone(),
+        env["STATIC_ARTIFACTS_SECRET_ACCESS_KEY"].clone(),
         None,
         None,
         "Static Artifacts storage",
@@ -958,11 +959,11 @@ mod tests {
         let mut test_env = HashMap::new();
         test_env.insert("RELEASE_ID".to_string(), "test-release-id".to_string());
         test_env.insert(
-            "STATIC_ARTIFACTS_AWS_ACCESS_KEY_ID".to_string(),
+            "STATIC_ARTIFACTS_ACCESS_KEY_ID".to_string(),
             "test-key".to_string(),
         );
         test_env.insert(
-            "STATIC_ARTIFACTS_AWS_SECRET_ACCESS_KEY".to_string(),
+            "STATIC_ARTIFACTS_SECRET_ACCESS_KEY".to_string(),
             "test-secret".to_string(),
         );
         test_env.insert(
@@ -978,11 +979,11 @@ mod tests {
     fn guard_should_fail_missing_requirements() {
         let mut test_env = HashMap::new();
         test_env.insert(
-            "STATIC_ARTIFACTS_AWS_ACCESS_KEY_ID".to_string(),
+            "STATIC_ARTIFACTS_ACCESS_KEY_ID".to_string(),
             "test-key".to_string(),
         );
         test_env.insert(
-            "STATIC_ARTIFACTS_AWS_SECRET_ACCESS_KEY".to_string(),
+            "STATIC_ARTIFACTS_SECRET_ACCESS_KEY".to_string(),
             "test-secret".to_string(),
         );
         test_env.insert(
@@ -996,7 +997,7 @@ mod tests {
         let mut test_env = HashMap::new();
         test_env.insert("RELEASE_ID".to_string(), "test-release-id".to_string());
         test_env.insert(
-            "STATIC_ARTIFACTS_AWS_SECRET_ACCESS_KEY".to_string(),
+            "STATIC_ARTIFACTS_SECRET_ACCESS_KEY".to_string(),
             "test-secret".to_string(),
         );
         test_env.insert(
@@ -1010,7 +1011,7 @@ mod tests {
         let mut test_env = HashMap::new();
         test_env.insert("RELEASE_ID".to_string(), "test-release-id".to_string());
         test_env.insert(
-            "STATIC_ARTIFACTS_AWS_ACCESS_KEY_ID".to_string(),
+            "STATIC_ARTIFACTS_ACCESS_KEY_ID".to_string(),
             "test-key".to_string(),
         );
         test_env.insert(
@@ -1024,11 +1025,11 @@ mod tests {
         let mut test_env = HashMap::new();
         test_env.insert("RELEASE_ID".to_string(), "test-release-id".to_string());
         test_env.insert(
-            "STATIC_ARTIFACTS_AWS_ACCESS_KEY_ID".to_string(),
+            "STATIC_ARTIFACTS_ACCESS_KEY_ID".to_string(),
             "test-key".to_string(),
         );
         test_env.insert(
-            "STATIC_ARTIFACTS_AWS_SECRET_ACCESS_KEY".to_string(),
+            "STATIC_ARTIFACTS_SECRET_ACCESS_KEY".to_string(),
             "test-secret".to_string(),
         );
 
@@ -1165,11 +1166,11 @@ mod tests {
     async fn generate_s3_client_with_region() {
         let mut test_env = HashMap::new();
         test_env.insert(
-            "STATIC_ARTIFACTS_AWS_ACCESS_KEY_ID".to_string(),
+            "STATIC_ARTIFACTS_ACCESS_KEY_ID".to_string(),
             "test-key-id".to_string(),
         );
         test_env.insert(
-            "STATIC_ARTIFACTS_AWS_SECRET_ACCESS_KEY".to_string(),
+            "STATIC_ARTIFACTS_SECRET_ACCESS_KEY".to_string(),
             "test-key-secret".to_string(),
         );
         let test_bucket_region = String::from("us-west-1");
@@ -1185,11 +1186,11 @@ mod tests {
     async fn generate_s3_client_without_region() {
         let mut test_env = HashMap::new();
         test_env.insert(
-            "STATIC_ARTIFACTS_AWS_ACCESS_KEY_ID".to_string(),
+            "STATIC_ARTIFACTS_ACCESS_KEY_ID".to_string(),
             "test-key-id".to_string(),
         );
         test_env.insert(
-            "STATIC_ARTIFACTS_AWS_SECRET_ACCESS_KEY".to_string(),
+            "STATIC_ARTIFACTS_SECRET_ACCESS_KEY".to_string(),
             "test-key-secret".to_string(),
         );
 
