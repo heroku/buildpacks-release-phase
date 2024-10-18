@@ -28,6 +28,7 @@ pub async fn save<S: BuildHasher>(
         Ok(scheme) if scheme == *"file" => {
             guard_file(env)?;
             let archive_name = generate_archive_name::<S>(env);
+            eprintln!("save-release-artifacts writing archive: {archive_name}");
             create_archive(dir, Path::new(archive_name.as_str()))?;
             let destination_path = generate_file_storage_location(env, &archive_name)?;
             fs::copy(archive_name, &destination_path).map_err(|e| {
@@ -41,12 +42,11 @@ pub async fn save<S: BuildHasher>(
         Ok(scheme) if scheme == *"s3" => {
             guard_s3(env)?;
             let archive_name = generate_archive_name::<S>(env);
+            eprintln!("save-release-artifacts uploading archive: {archive_name}");
             create_archive(dir, Path::new(archive_name.as_str()))?;
             let (bucket_name, bucket_region, bucket_key) =
                 generate_s3_storage_location(env, &archive_name)?;
             let s3 = generate_s3_client(env, bucket_region).await;
-
-            eprintln!("save-release-artifacts putting archive: {archive_name}");
             upload_with_client(&s3, &bucket_name, &bucket_key, &archive_name).await
         }
         Ok(scheme) => Err(ReleaseArtifactsError::StorageURLUnsupportedScheme(scheme)),
@@ -62,6 +62,7 @@ pub async fn load<S: BuildHasher>(
         Ok(scheme) if scheme == *"file" => {
             guard_file(env)?;
             let archive_name = generate_archive_name::<S>(env);
+            eprintln!("load-release-artifacts reading archive: {archive_name}");
             let source_path = generate_file_storage_location(env, &archive_name)?;
             extract_archive(&source_path, dir)?;
             Ok(source_path.to_string_lossy().to_string())
@@ -69,11 +70,10 @@ pub async fn load<S: BuildHasher>(
         Ok(scheme) if scheme == *"s3" => {
             guard_s3(env)?;
             let archive_name = generate_archive_name::<S>(env);
+            eprintln!("load-release-artifacts downloading archive: {archive_name}");
             let (bucket_name, bucket_region, bucket_key) =
                 generate_s3_storage_location(env, &archive_name)?;
             let s3 = generate_s3_client(env, bucket_region).await;
-
-            eprintln!("load-release-artifacts getting archive: {archive_name}");
             download_specific_or_latest_with_client(&s3, &bucket_name, &bucket_key, dir).await
         }
         Ok(scheme) => Err(ReleaseArtifactsError::StorageURLUnsupportedScheme(scheme)),
