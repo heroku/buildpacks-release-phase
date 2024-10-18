@@ -2,6 +2,7 @@
 resolver = "2"
 members = [
     "buildpacks/release-phase",
+    "common/release_artifacts",
     "common/release_commands"
 ]
 

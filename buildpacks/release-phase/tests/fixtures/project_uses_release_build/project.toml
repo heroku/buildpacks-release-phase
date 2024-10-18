@@ -6,4 +6,4 @@ uri = "heroku/release-phase"
 
 [com.heroku.phase.release-build]
 command = "bash"
-args = ["-c", "echo 'Build in Release Phase Buildpack!'"]
+args = ["-c", "echo 'Build in Release Phase Buildpack!'; mkdir -p /workspace/static-artifacts; echo 'Hello static world!' > /workspace/static-artifacts/note.txt"]

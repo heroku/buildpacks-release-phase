@@ -62,6 +62,7 @@ pub enum Error {
     TomlReleaseCommandsDeserializeError(toml::de::Error),
     TomlWriteReleaseCommandsFileError(TomlFileError),
     ReleaseCommandExecError(std::io::Error),
+    ReleaseCommandExitedError(String),
 }
 
 impl fmt::Display for Error {
@@ -94,24 +95,27 @@ impl fmt::Display for Error {
                 write!(f, "Failure writing `release-commands.toml`, {error:#?}")
             }
             Error::ReleaseCommandExecError(error) => {
-                write!(f, "Command failed, {error:#?}")
+                write!(f, "Command exec failed, {error:#?}")
+            }
+            Error::ReleaseCommandExitedError(error) => {
+                write!(f, "Command exited with error, {error}")
             }
         }
     }
 }
 
-pub fn read_project_config(project_toml_path: &Path) -> Result<ReleaseCommands, Error> {
+pub fn generate_commands_config(project_toml_path: &Path) -> Result<ReleaseCommands, Error> {
     let project_toml = if project_toml_path.is_file() {
         read_toml_file::<toml::Value>(project_toml_path).map_err(Error::TomlProjectFileError)?
     } else {
         toml::Table::new().into()
     };
 
-    let mut release_commands = toml::Table::new();
+    let mut commands_toml = toml::Table::new();
     if let Some(release_config) =
         toml_select_value(vec!["com", "heroku", "phase", "release"], &project_toml).cloned()
     {
-        release_commands.insert("release".to_string(), release_config);
+        commands_toml.insert("release".to_string(), release_config);
     };
     if let Some(release_build_config) = toml_select_value(
         vec!["com", "heroku", "phase", "release-build"],
@@ -119,12 +123,24 @@ pub fn read_project_config(project_toml_path: &Path) -> Result<ReleaseCommands, 
     )
     .cloned()
     {
-        release_commands.insert("release-build".to_string(), release_build_config);
+        commands_toml.insert("release-build".to_string(), release_build_config);
     };
 
-    release_commands
+    let mut commands = commands_toml
         .try_into::<ReleaseCommands>()
-        .map_err(Error::TomlProjectDeserializeError)
+        .map_err(Error::TomlProjectDeserializeError)?;
+
+    if commands.release_build.is_some() {
+        // Add the saver as the first release command, immediately after release-build.
+        let save_exec = Executable {
+            command: "save-release-artifacts".to_string(),
+            args: Some(vec!["static-artifacts/".to_string()]),
+            source: Some("Heroku Release Phase Buildpack".to_string()),
+        };
+        commands.release = Some([vec![save_exec], commands.release.map_or(vec![], |v| v)].concat());
+    }
+
+    Ok(commands)
 }
 
 pub fn read_commands_config(commands_toml_path: &Path) -> Result<ReleaseCommands, Error> {
@@ -155,15 +171,15 @@ mod tests {
     use libherokubuildpack::toml::toml_select_value;
     use toml::toml;
 
+    use crate::generate_commands_config;
     use crate::read_commands_config;
-    use crate::read_project_config;
     use crate::write_commands_config;
     use crate::Executable;
     use crate::ReleaseCommands;
 
     #[test]
     fn reads_project_toml_for_release_commands() {
-        let project_config = read_project_config(
+        let project_config = generate_commands_config(
             PathBuf::from(
                 "../../buildpacks/release-phase/tests/fixtures/project_uses_release/project.toml",
             )
@@ -196,7 +212,7 @@ mod tests {
 
     #[test]
     fn reads_project_toml_for_release_build_command() {
-        let project_config = read_project_config(
+        let project_config = generate_commands_config(
             PathBuf::from(
                 "../../buildpacks/release-phase/tests/fixtures/project_uses_release_build/project.toml",
             )
@@ -209,17 +225,24 @@ mod tests {
                 command: "bash".to_string(),
                 args: Some(vec![
                     "-c".to_string(),
-                    "echo 'Build in Release Phase Buildpack!'".to_string()
+                    "echo 'Build in Release Phase Buildpack!'; mkdir -p /workspace/static-artifacts; echo 'Hello static world!' > /workspace/static-artifacts/note.txt".to_string()
                 ]),
                 source: None,
             })
         );
-        assert_eq!(project_config.release, None);
+        assert_eq!(
+            project_config.release,
+            Some(vec![Executable {
+                command: "save-release-artifacts".to_string(),
+                args: Some(vec!["static-artifacts/".to_string()]),
+                source: Some("Heroku Release Phase Buildpack".to_string()),
+            }])
+        );
     }
 
     #[test]
     fn no_project_toml() {
-        let project_config = read_project_config(
+        let project_config = generate_commands_config(
             PathBuf::from(
                 "../../buildpacks/release-phase/tests/fixtures/no_project_toml/project.toml",
             )

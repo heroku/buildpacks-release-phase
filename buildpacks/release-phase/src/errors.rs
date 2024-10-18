@@ -12,7 +12,10 @@ locally with a minimal example and open an issue in the buildpack's GitHub repos
 
 #[derive(Debug)]
 pub(crate) enum ReleasePhaseBuildpackError {
+    CannotInstallArtifactSaver(std::io::Error),
+    CannotInstallArtifactLoader(std::io::Error),
     CannotInstallCommandExecutor(std::io::Error),
+    CannotCreatWebExecD(std::io::Error),
     ConfigurationFailed(release_commands::Error),
 }
 
@@ -28,11 +31,32 @@ pub(crate) fn on_error(error: libcnb::Error<ReleasePhaseBuildpackError>) {
 
 fn on_buildpack_error(error: ReleasePhaseBuildpackError, logger: Box<dyn StartedLogger>) {
     match error {
+        ReleasePhaseBuildpackError::CannotInstallArtifactSaver(error) => {
+            print_error_details(logger, &error)
+                .announce()
+                .error(&formatdoc! {"
+                Cannot install save-release-artifacts for {buildpack_name}
+            ", buildpack_name = fmt::value(BUILDPACK_NAME) });
+        }
+        ReleasePhaseBuildpackError::CannotInstallArtifactLoader(error) => {
+            print_error_details(logger, &error)
+                .announce()
+                .error(&formatdoc! {"
+                Cannot install load-release-artifacts for {buildpack_name}
+            ", buildpack_name = fmt::value(BUILDPACK_NAME) });
+        }
         ReleasePhaseBuildpackError::CannotInstallCommandExecutor(error) => {
             print_error_details(logger, &error)
                 .announce()
                 .error(&formatdoc! {"
-                Cannot install Command Executor in {buildpack_name}
+                Cannot install exec-release-commands for {buildpack_name}
+            ", buildpack_name = fmt::value(BUILDPACK_NAME) });
+        }
+        ReleasePhaseBuildpackError::CannotCreatWebExecD(error) => {
+            print_error_details(logger, &error)
+                .announce()
+                .error(&formatdoc! {"
+                Cannot create exec.d/web for {buildpack_name}
             ", buildpack_name = fmt::value(BUILDPACK_NAME) });
         }
         ReleasePhaseBuildpackError::ConfigurationFailed(error) => {

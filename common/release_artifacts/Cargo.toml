@@ -1,0 +1,23 @@
+[package]
+name = "release_artifacts"
+rust-version.workspace = true
+edition.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+aws-config = { version = "1.5.7", features = ["behavior-version-latest"] }
+aws-sdk-s3 = { version = "1.52.0", features = ["rt-tokio"] }
+aws-smithy-types = { version = "1.2.7" }
+flate2 = { version = "1.0.33", default-features = false, features = ["zlib"] }
+regex = { version = "1.11.0" }
+tar = { version = "0.4.41", default-features = false }
+tokio = { version = "1.40.0", features = ["full"] }
+uuid = { version = "1.10.0", features = ["v4", "serde"] }
+url = { version = "2.5.2" }
+
+[dev-dependencies]
+aws-smithy-types = { version = "1.0.1" }
+aws-smithy-runtime = { version = "1.0.1", features = ["test-util"] }
+http = "1.1.0"

@@ -7,14 +7,19 @@ use release_commands::read_commands_config;
 
 fn main() {
     let args: Vec<String> = env::args().collect();
-    let commands_toml_path = Path::new(&args[1]);
+    let commands_toml_path = if let Some(p) = args.get(1) {
+        Path::new(p)
+    } else {
+        eprintln!("release-phase failed: exec command requires argument, the path to release-commands.toml");
+        std::process::exit(1);
+    };
     match exec_release_sequence(commands_toml_path) {
         Ok(()) => {
             eprintln!("release-phase complete.");
             std::process::exit(0);
         }
         Err(error) => {
-            eprintln!("release-phase failed: {error:#?}");
+            eprintln!("release-phase failed: {error}");
             std::process::exit(1);
         }
     }
@@ -31,8 +36,14 @@ fn exec_release_sequence(commands_toml_path: &Path) -> Result<(), release_comman
         let output = cmd
             .output()
             .map_err(release_commands::Error::ReleaseCommandExecError)?;
-        eprint!("{}", String::from_utf8_lossy(&output.stderr));
-        print!("{}", String::from_utf8_lossy(&output.stdout));
+        let log = tidy_logs(
+            String::from_utf8_lossy(&output.stderr).as_ref(),
+            String::from_utf8_lossy(&output.stdout).as_ref(),
+        );
+        if output.status.code() != Some(0) {
+            return Err(release_commands::Error::ReleaseCommandExitedError(log));
+        }
+        print!("{log}");
     };
 
     if let Some(release_config) = config.release {
@@ -43,12 +54,32 @@ fn exec_release_sequence(commands_toml_path: &Path) -> Result<(), release_comman
             let output = cmd
                 .output()
                 .map_err(release_commands::Error::ReleaseCommandExecError)?;
-            print!("{}", String::from_utf8_lossy(&output.stdout));
-            eprint!("{}", String::from_utf8_lossy(&output.stderr));
+            let log = tidy_logs(
+                String::from_utf8_lossy(&output.stderr).as_ref(),
+                String::from_utf8_lossy(&output.stdout).as_ref(),
+            );
+            if output.status.code() != Some(0) {
+                return Err(release_commands::Error::ReleaseCommandExitedError(log));
+            }
+            print!("{log}");
         }
     };
 
     Ok(())
+}
+
+fn tidy_logs(stderr: &str, stdout: &str) -> String {
+    let mut output = String::new();
+    if !stderr.is_empty() {
+        output = output + "stderr:\n" + stderr;
+    }
+    if !stderr.is_empty() && !stdout.is_empty() {
+        output += "\n";
+    }
+    if !stdout.is_empty() {
+        output = output + "stdout:\n" + stdout;
+    }
+    output
 }
 
 #[cfg(test)]
