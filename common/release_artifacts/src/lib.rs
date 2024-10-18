@@ -9,7 +9,7 @@ use std::{
     fs::{self, File},
     hash::BuildHasher,
     io::Write,
-    path::Path,
+    path::{Path, PathBuf},
 };
 use tar::Archive;
 
@@ -24,27 +24,61 @@ pub async fn upload<S: BuildHasher>(
     env: &HashMap<String, String, S>,
     dir: &Path,
 ) -> Result<(), ReleaseArtifactsError> {
-    guard(env)?;
-    let archive_name = generate_archive_name::<S>(env);
-    create_archive(dir, Path::new(archive_name.as_str()))?;
-    let (bucket_name, bucket_region, bucket_key) = generate_storage_location(env, &archive_name)?;
-    let s3 = generate_s3_client(env, bucket_region).await;
+    match detect_storage_scheme(env) {
+        Ok(scheme) if scheme == *"file" => {
+            guard_file(env)?;
+            let archive_name = generate_archive_name::<S>(env);
+            create_archive(dir, Path::new(archive_name.as_str()))?;
+            let destination_path = generate_file_storage_location(env, &archive_name)?;
+            fs::copy(archive_name, &destination_path).map_err(|e| {
+                ReleaseArtifactsError::ArchiveError(
+                    e,
+                    format!("when copying artifact archive to {destination_path:?}"),
+                )
+            })?;
+            Ok(())
+        }
+        Ok(scheme) if scheme == *"s3" => {
+            guard_s3(env)?;
+            let archive_name = generate_archive_name::<S>(env);
+            create_archive(dir, Path::new(archive_name.as_str()))?;
+            let (bucket_name, bucket_region, bucket_key) =
+                generate_s3_storage_location(env, &archive_name)?;
+            let s3 = generate_s3_client(env, bucket_region).await;
 
-    eprintln!("upload-release-artifacts putting archive: {archive_name}");
-    upload_with_client(&s3, &bucket_name, &bucket_key, &archive_name).await
+            eprintln!("upload-release-artifacts putting archive: {archive_name}");
+            upload_with_client(&s3, &bucket_name, &bucket_key, &archive_name).await
+        }
+        Ok(scheme) => Err(ReleaseArtifactsError::StorageURLUnsupportedScheme(scheme)),
+        Err(e) => Err(e),
+    }
 }
 
 pub async fn download<S: BuildHasher>(
     env: &HashMap<String, String, S>,
     dir: &Path,
 ) -> Result<String, ReleaseArtifactsError> {
-    guard(env)?;
-    let archive_name = generate_archive_name::<S>(env);
-    let (bucket_name, bucket_region, bucket_key) = generate_storage_location(env, &archive_name)?;
-    let s3 = generate_s3_client(env, bucket_region).await;
+    match detect_storage_scheme(env) {
+        Ok(scheme) if scheme == *"file" => {
+            guard_file(env)?;
+            let archive_name = generate_archive_name::<S>(env);
+            let source_path = generate_file_storage_location(env, &archive_name)?;
+            extract_archive(&source_path, dir)?;
+            Ok(source_path.to_string_lossy().to_string())
+        }
+        Ok(scheme) if scheme == *"s3" => {
+            guard_s3(env)?;
+            let archive_name = generate_archive_name::<S>(env);
+            let (bucket_name, bucket_region, bucket_key) =
+                generate_s3_storage_location(env, &archive_name)?;
+            let s3 = generate_s3_client(env, bucket_region).await;
 
-    eprintln!("download-release-artifacts getting archive: {archive_name}");
-    download_specific_or_latest_with_client(&s3, &bucket_name, &bucket_key, dir).await
+            eprintln!("download-release-artifacts getting archive: {archive_name}");
+            download_specific_or_latest_with_client(&s3, &bucket_name, &bucket_key, dir).await
+        }
+        Ok(scheme) => Err(ReleaseArtifactsError::StorageURLUnsupportedScheme(scheme)),
+        Err(e) => Err(e),
+    }
 }
 
 pub async fn upload_with_client(
@@ -192,7 +226,19 @@ pub async fn find_latest_with_client(
     Ok(latest_key)
 }
 
-fn guard<S: ::std::hash::BuildHasher>(
+fn detect_storage_scheme<S: BuildHasher>(
+    env: &HashMap<String, String, S>,
+) -> Result<String, ReleaseArtifactsError> {
+    match env.get("STATIC_ARTIFACTS_URL") {
+        Some(url) => {
+            let result = Url::parse(url).map_err(ReleaseArtifactsError::StorageURLInvalid)?;
+            Ok(result.scheme().to_string())
+        }
+        None => Err(ReleaseArtifactsError::StorageURLMissing),
+    }
+}
+
+fn guard_s3<S: ::std::hash::BuildHasher>(
     env: &HashMap<String, String, S>,
 ) -> Result<(), ReleaseArtifactsError> {
     let mut messages: Vec<String> = vec![];
@@ -204,6 +250,22 @@ fn guard<S: ::std::hash::BuildHasher>(
     }
     if !env.contains_key("STATIC_ARTIFACTS_SECRET_ACCESS_KEY") {
         messages.push("STATIC_ARTIFACTS_SECRET_ACCESS_KEY is required".to_string());
+    }
+    if !env.contains_key("STATIC_ARTIFACTS_URL") {
+        messages.push("STATIC_ARTIFACTS_URL is required".to_string());
+    }
+    if !messages.is_empty() {
+        return Err(ReleaseArtifactsError::ConfigMissing(messages.join(". ")));
+    }
+    Ok(())
+}
+
+fn guard_file<S: ::std::hash::BuildHasher>(
+    env: &HashMap<String, String, S>,
+) -> Result<(), ReleaseArtifactsError> {
+    let mut messages: Vec<String> = vec![];
+    if !env.contains_key("RELEASE_ID") {
+        messages.push("RELEASE_ID is required".to_string());
     }
     if !env.contains_key("STATIC_ARTIFACTS_URL") {
         messages.push("STATIC_ARTIFACTS_URL is required".to_string());
@@ -226,7 +288,7 @@ fn generate_archive_name<S: BuildHasher>(env: &HashMap<String, String, S>) -> St
     }
 }
 
-fn generate_storage_location<S: BuildHasher>(
+fn generate_s3_storage_location<S: BuildHasher>(
     env: &HashMap<String, String, S>,
     archive_name: &String,
 ) -> Result<(String, Option<String>, String), ReleaseArtifactsError> {
@@ -237,6 +299,23 @@ fn generate_storage_location<S: BuildHasher>(
     let bucket_key =
         bucket_path.map_or_else(|| archive_name.clone(), |p| format!("{p}/{archive_name}"));
     Ok((bucket_name, bucket_region, bucket_key))
+}
+
+fn generate_file_storage_location<S: BuildHasher>(
+    env: &HashMap<String, String, S>,
+    archive_name: &String,
+) -> Result<PathBuf, ReleaseArtifactsError> {
+    let url = Url::parse(&env["STATIC_ARTIFACTS_URL"])
+        .map_err(ReleaseArtifactsError::StorageURLInvalid)?;
+    let dest_path = url.path();
+    fs::create_dir_all(dest_path).map_err(|e| {
+        ReleaseArtifactsError::ArchiveError(
+            e,
+            format!("creating filesystem destination directory '{dest_path}'"),
+        )
+    })?;
+    let result = Path::new(dest_path).join(archive_name);
+    Ok(result.clone())
 }
 
 async fn generate_s3_client<S: BuildHasher>(
@@ -362,6 +441,7 @@ fn make_s3_test_credentials() -> aws_sdk_s3::config::Credentials {
 mod tests {
     use std::{
         collections::HashMap,
+        env,
         fs::{self, File},
         io::Read,
         path::Path,
@@ -376,11 +456,39 @@ mod tests {
     use aws_smithy_types::body::SdkBody;
 
     use crate::{
-        create_archive, download_specific_or_latest_with_client, download_with_client,
-        errors::ReleaseArtifactsError, extract_archive, find_latest_with_client,
-        generate_archive_name, generate_s3_client, generate_storage_location, guard,
-        make_s3_test_credentials, parse_s3_url, upload_with_client,
+        create_archive, detect_storage_scheme, download, download_specific_or_latest_with_client,
+        download_with_client, errors::ReleaseArtifactsError, extract_archive,
+        find_latest_with_client, generate_archive_name, generate_file_storage_location,
+        generate_s3_client, generate_s3_storage_location, guard_file, guard_s3,
+        make_s3_test_credentials, parse_s3_url, upload, upload_with_client,
     };
+
+    #[tokio::test]
+    async fn upload_file_url_succeeds() {
+        let unique = Uuid::new_v4();
+        let output_archive_dir = format!("test-saved-static-artifacts-{unique}");
+        let abs_root = env::current_dir().expect("should have a current working directory");
+        let output_archive_dir_path = Path::new(&abs_root).join(output_archive_dir.as_str());
+        fs::remove_dir_all(&output_archive_dir_path).unwrap_or_default();
+
+        let mut test_env = HashMap::new();
+        test_env.insert("RELEASE_ID".to_string(), unique.to_string());
+        test_env.insert(
+            "STATIC_ARTIFACTS_URL".to_string(),
+            format!("file://{}", output_archive_dir_path.to_string_lossy()),
+        );
+
+        let result = upload(&test_env, Path::new("test/fixtures/static-artifacts")).await;
+
+        eprintln!("{result:?}");
+        assert!(result.is_ok());
+        eprintln!("{:#?}", fs::metadata(&output_archive_dir_path));
+        assert!(fs::metadata(&output_archive_dir_path).is_ok());
+        assert!(
+            fs::metadata(output_archive_dir_path.join(format!("release-{unique}.tgz"))).is_ok()
+        );
+        fs::remove_dir_all(output_archive_dir_path).expect("temporary directory should be deleted");
+    }
 
     #[tokio::test]
     async fn upload_with_client_succeeds() {
@@ -415,6 +523,32 @@ mod tests {
 
         assert!(result.is_ok());
         replay_client.assert_requests_match(&[]);
+    }
+
+    #[tokio::test]
+    async fn download_file_url_succeeds() {
+        let unique = Uuid::new_v4();
+        let abs_root = env::current_dir().expect("should have a current working directory");
+        let source_archive_dir_path = Path::new(&abs_root).join("test/fixtures");
+        let destination_dir_path =
+            Path::new(&abs_root).join(format!("static-artifacts-test-{unique}"));
+
+        let mut test_env = HashMap::new();
+        test_env.insert("RELEASE_ID".to_string(), "xxxxx".to_string());
+        test_env.insert(
+            "STATIC_ARTIFACTS_URL".to_string(),
+            format!("file://{}", source_archive_dir_path.to_string_lossy()).to_string(),
+        );
+
+        let result = download(&test_env, &destination_dir_path).await;
+
+        eprintln!("{result:?}");
+        assert!(result.is_ok());
+        assert!(fs::metadata(&destination_dir_path).is_ok());
+        assert!(fs::metadata(destination_dir_path.join("index.html")).is_ok());
+        assert!(fs::metadata(destination_dir_path.join("images")).is_ok());
+        assert!(fs::metadata(destination_dir_path.join("images/desktop-heroku-pride.jpg")).is_ok());
+        fs::remove_dir_all(destination_dir_path).expect("temporary directory should be deleted");
     }
 
     #[tokio::test]
@@ -955,7 +1089,7 @@ mod tests {
     }
 
     #[test]
-    fn guard_should_pass_with_required_env() {
+    fn guard_s3_should_pass_with_required_env() {
         let mut test_env = HashMap::new();
         test_env.insert("RELEASE_ID".to_string(), "test-release-id".to_string());
         test_env.insert(
@@ -971,12 +1105,12 @@ mod tests {
             "s3://test-bucket.s3.us-west-2.amazonaws.com".to_string(),
         );
 
-        let result = guard(&test_env);
+        let result = guard_s3(&test_env);
         assert!(result.is_ok());
     }
 
     #[test]
-    fn guard_should_fail_missing_requirements() {
+    fn guard_s3_should_fail_missing_requirements() {
         let mut test_env = HashMap::new();
         test_env.insert(
             "STATIC_ARTIFACTS_ACCESS_KEY_ID".to_string(),
@@ -991,7 +1125,7 @@ mod tests {
             "s3://test-bucket.s3.us-west-2.amazonaws.com".to_string(),
         );
 
-        let result = guard(&test_env);
+        let result = guard_s3(&test_env);
         assert!(result.is_err());
 
         let mut test_env = HashMap::new();
@@ -1005,7 +1139,7 @@ mod tests {
             "s3://test-bucket.s3.us-west-2.amazonaws.com".to_string(),
         );
 
-        let result = guard(&test_env);
+        let result = guard_s3(&test_env);
         assert!(result.is_err());
 
         let mut test_env = HashMap::new();
@@ -1019,7 +1153,7 @@ mod tests {
             "s3://test-bucket.s3.us-west-2.amazonaws.com".to_string(),
         );
 
-        let result = guard(&test_env);
+        let result = guard_s3(&test_env);
         assert!(result.is_err());
 
         let mut test_env = HashMap::new();
@@ -1033,7 +1167,38 @@ mod tests {
             "test-secret".to_string(),
         );
 
-        let result = guard(&test_env);
+        let result = guard_s3(&test_env);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn guard_file_should_pass_with_required_env() {
+        let mut test_env = HashMap::new();
+        test_env.insert("RELEASE_ID".to_string(), "test-release-id".to_string());
+        test_env.insert(
+            "STATIC_ARTIFACTS_URL".to_string(),
+            "file:///volumes/static-artifacts".to_string(),
+        );
+
+        let result = guard_file(&test_env);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn guard_file_should_fail_missing_requirements() {
+        let mut test_env = HashMap::new();
+        test_env.insert(
+            "STATIC_ARTIFACTS_URL".to_string(),
+            "file:///volumes/static-artifacts".to_string(),
+        );
+
+        let result = guard_file(&test_env);
+        assert!(result.is_err());
+
+        let mut test_env = HashMap::new();
+        test_env.insert("RELEASE_ID".to_string(), "test-release-id".to_string());
+
+        let result = guard_file(&test_env);
         assert!(result.is_err());
     }
 
@@ -1056,12 +1221,12 @@ mod tests {
     }
 
     #[test]
-    fn generate_storage_location_without_path_in_url() {
+    fn generate_s3_storage_location_without_path_in_url() {
         let mut test_env = HashMap::new();
         test_env.insert("STATIC_ARTIFACTS_URL".to_string(), "s3://xxxxx".to_string());
         let test_name = String::from("test-name.tgz");
 
-        let result = generate_storage_location(&test_env, &test_name);
+        let result = generate_s3_storage_location(&test_env, &test_name);
         println!("{result:#?}");
         assert!(result.is_ok());
         assert_eq!(
@@ -1071,7 +1236,7 @@ mod tests {
     }
 
     #[test]
-    fn generate_storage_location_without_region() {
+    fn generate_s3_storage_location_without_region() {
         let mut test_env = HashMap::new();
         test_env.insert(
             "STATIC_ARTIFACTS_URL".to_string(),
@@ -1079,7 +1244,7 @@ mod tests {
         );
         let test_name = String::from("test-name.tgz");
 
-        let result = generate_storage_location(&test_env, &test_name);
+        let result = generate_s3_storage_location(&test_env, &test_name);
         println!("{result:#?}");
         assert!(result.is_ok());
         assert_eq!(
@@ -1089,7 +1254,7 @@ mod tests {
     }
 
     #[test]
-    fn generate_storage_location_with_region_in_url() {
+    fn generate_s3_storage_location_with_region_in_url() {
         let mut test_env = HashMap::new();
         test_env.insert(
             "STATIC_ARTIFACTS_URL".to_string(),
@@ -1097,7 +1262,7 @@ mod tests {
         );
         let test_name = String::from("test-name.tgz");
 
-        let result = generate_storage_location(&test_env, &test_name);
+        let result = generate_s3_storage_location(&test_env, &test_name);
         println!("{result:#?}");
         assert!(result.is_ok());
         assert_eq!(
@@ -1111,7 +1276,7 @@ mod tests {
     }
 
     #[test]
-    fn generate_storage_location_with_region_in_env() {
+    fn generate_s3_storage_location_with_region_in_env() {
         let mut test_env = HashMap::new();
         test_env.insert(
             "STATIC_ARTIFACTS_URL".to_string(),
@@ -1123,7 +1288,7 @@ mod tests {
         );
         let test_name = String::from("test-name.tgz");
 
-        let result = generate_storage_location(&test_env, &test_name);
+        let result = generate_s3_storage_location(&test_env, &test_name);
         println!("{result:#?}");
         assert!(result.is_ok());
         assert_eq!(
@@ -1137,7 +1302,7 @@ mod tests {
     }
 
     #[test]
-    fn generate_storage_location_with_region_in_both() {
+    fn generate_s3_storage_location_with_region_in_both() {
         let mut test_env = HashMap::new();
         test_env.insert(
             "STATIC_ARTIFACTS_URL".to_string(),
@@ -1149,7 +1314,7 @@ mod tests {
         );
         let test_name = String::from("test-name.tgz");
 
-        let result = generate_storage_location(&test_env, &test_name);
+        let result = generate_s3_storage_location(&test_env, &test_name);
         println!("{result:#?}");
         assert!(result.is_ok());
         assert_eq!(
@@ -1160,6 +1325,32 @@ mod tests {
                 "yyyyy/test-name.tgz".to_string()
             )
         );
+    }
+
+    #[test]
+    fn generate_file_storage_location_succeeds() {
+        let unique = Uuid::new_v4();
+        let output_archive_dir = format!("test-file-storage-location-{unique}");
+        let abs_root = env::current_dir().expect("should have a current working directory");
+        let output_archive_dir_path = Path::new(&abs_root).join(output_archive_dir.as_str());
+        fs::remove_dir_all(&output_archive_dir_path).unwrap_or_default();
+
+        let mut test_env = HashMap::new();
+        test_env.insert(
+            "STATIC_ARTIFACTS_URL".to_string(),
+            format!("file://{}", output_archive_dir_path.to_string_lossy()),
+        );
+        let test_name = String::from("test-name.tgz");
+
+        let result = generate_file_storage_location(&test_env, &test_name);
+        println!("{result:#?}");
+        assert!(result.is_ok());
+        assert_eq!(
+            result.expect("result is ok"),
+            output_archive_dir_path.join(test_name)
+        );
+
+        fs::remove_dir_all(output_archive_dir_path).expect("temporary directory should be deleted");
     }
 
     #[tokio::test]
@@ -1199,6 +1390,27 @@ mod tests {
             .config()
             .region()
             .is_some_and(|r| r.to_string() == "us-east-1"));
+    }
+
+    #[test]
+    fn detect_storage_scheme_return_scheme() {
+        let mut test_env = HashMap::new();
+        test_env.insert(
+            "STATIC_ARTIFACTS_URL".to_string(),
+            "file:///volumes/static-artifacts".to_string(),
+        );
+
+        let result = detect_storage_scheme(&test_env).expect("should parse the URL");
+        assert_eq!(result, "file".to_string());
+
+        let mut test_env = HashMap::new();
+        test_env.insert(
+            "STATIC_ARTIFACTS_URL".to_string(),
+            "s3://bucket-of-static-artifacts/path/to/them".to_string(),
+        );
+
+        let result = detect_storage_scheme(&test_env).expect("should parse the URL");
+        assert_eq!(result, "s3".to_string());
     }
 
     #[test]

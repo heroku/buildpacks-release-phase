@@ -5,7 +5,9 @@ pub enum ReleaseArtifactsError {
     ConfigMissing(String),
     StorageError(String),
     StorageKeyNotFound(String),
+    StorageURLUnsupportedScheme(String),
     StorageURLInvalid(url::ParseError),
+    StorageURLMissing,
     StorageURLHostMissing(String),
 }
 
