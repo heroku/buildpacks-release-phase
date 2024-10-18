@@ -77,7 +77,7 @@ pub async fn download_specific_or_latest_with_client(
         Ok(()) => Ok(()),
         Err(e) => match e {
             ReleaseArtifactsError::StorageKeyNotFound(_) => {
-                eprintln!("download-release-artifacts specific artifact not found, instead getting latest artifact");
+                eprintln!("download-release-artifacts specific artifact not found '{bucket_key}', instead getting latest artifact");
                 let key_parts = bucket_key.split('/');
                 let key_prefix_size = key_parts.clone().count() - 1;
                 let key_prefix_parts: Vec<&str> = key_parts.clone().take(key_prefix_size).collect();
@@ -86,13 +86,14 @@ pub async fn download_specific_or_latest_with_client(
                 } else {
                     key_prefix_parts.join("/") + "/"
                 };
-                let latest_basename = find_latest_with_client(s3, bucket_name, &key_prefix)
+                let latest_result = find_latest_with_client(s3, bucket_name, &key_prefix)
                     .await
                     .map_err(ReleaseArtifactsError::from)?;
-                match latest_basename {
-                    Some(basename) => {
-                        let latest_key = key_prefix + &basename;
-                        download_with_client(s3, bucket_name, &latest_key, destination_dir).await
+                match latest_result {
+                    Some(latest_bucket_key) => {
+                        eprintln!("download-release-artifacts getting latest artifact '{latest_bucket_key}'");
+                        download_with_client(s3, bucket_name, &latest_bucket_key, destination_dir)
+                            .await
                     }
                     None => Err(ReleaseArtifactsError::StorageKeyNotFound(format!(
                         "Nothing found in bucket '{bucket_name}' prefix '{key_prefix}'"
@@ -541,15 +542,15 @@ mod tests {
                     <ListBucketResult>
                         <IsTruncated>false</IsTruncated>
                         <Contents>
-                            <Key>v100.tgz</Key>
+                            <Key>sub/path/v100.tgz</Key>
                             <LastModified>2024-07-01T12:20:47.000Z</LastModified>
                         </Contents>
                         <Contents>
-                            <Key>v102.tgz</Key>
+                            <Key>sub/path/v102.tgz</Key>
                             <LastModified>2024-07-04T04:51:50.000Z</LastModified>
                         </Contents>
                         <Contents>
-                            <Key>v101.tgz</Key>
+                            <Key>sub/path/v101.tgz</Key>
                             <LastModified>2024-07-01T19:40:05.000Z</LastModified>
                         </Contents>
                     </ListBucketResult>",
