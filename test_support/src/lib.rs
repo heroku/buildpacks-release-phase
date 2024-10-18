@@ -110,10 +110,11 @@ pub fn start_container(ctx: &TestContext, in_container: impl Fn(&ContainerContex
 
 pub fn start_container_entrypoint(
     ctx: &TestContext,
+    config: &mut ContainerConfig,
     entrypoint: &String,
     in_container: impl Fn(&ContainerContext),
 ) {
-    ctx.start_container(ContainerConfig::new().entrypoint(entrypoint), |container| {
+    ctx.start_container(config.entrypoint(entrypoint), |container| {
         let container_logs = container.logs_wait();
         println!(
             "
