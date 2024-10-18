@@ -7,7 +7,12 @@ use release_commands::read_commands_config;
 
 fn main() {
     let args: Vec<String> = env::args().collect();
-    let commands_toml_path = Path::new(&args[1]);
+    let commands_toml_path = if let Some(p) = args.get(1) {
+        Path::new(p)
+    } else {
+        eprintln!("release-phase failed: exec command requires argument, the path to release-commands.toml");
+        std::process::exit(1);
+    };
     match exec_release_sequence(commands_toml_path) {
         Ok(()) => {
             eprintln!("release-phase complete.");
