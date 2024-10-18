@@ -33,7 +33,11 @@ fn project_uses_release_build() {
             let log_output = container.logs_now();
             assert_contains!(log_output.stderr, "release-phase plan");
             assert_contains!(log_output.stdout, "Build in Release Phase Buildpack!");
-            assert_contains!(log_output.stderr, "release-phase complete.");
+            // This error is expected because we are not integrating with AWS S3 in this test.
+            assert_contains!(
+                log_output.stderr,
+                "upload-release-artifacts failed: ConfigMissing"
+            );
         });
     });
 }

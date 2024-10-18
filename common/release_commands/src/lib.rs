@@ -62,6 +62,7 @@ pub enum Error {
     TomlReleaseCommandsDeserializeError(toml::de::Error),
     TomlWriteReleaseCommandsFileError(TomlFileError),
     ReleaseCommandExecError(std::io::Error),
+    ReleaseCommandExitedError(String),
 }
 
 impl fmt::Display for Error {
@@ -94,7 +95,10 @@ impl fmt::Display for Error {
                 write!(f, "Failure writing `release-commands.toml`, {error:#?}")
             }
             Error::ReleaseCommandExecError(error) => {
-                write!(f, "Command failed, {error:#?}")
+                write!(f, "Command exec failed, {error:#?}")
+            }
+            Error::ReleaseCommandExitedError(error) => {
+                write!(f, "Command exited with error, {error}")
             }
         }
     }
