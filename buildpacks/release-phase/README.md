@@ -14,17 +14,9 @@ schema-version = "0.2"
 uri = "heroku/release-phase"
 ```
 
-### Release Build command
-
-```toml
-[com.heroku.phase.release-build]
-command = "bash"
-args = ["-c", "npm build"]
-```
-
-This command must output release artifacts into `/workspace/static-artifacts/`. The content of this directory will be stored during Release Phase by the `RELEASE_ID`, and then automatically retrieved for `web` processes, during start-up.
-
 ### Release commands
+
+*Multiple `release` commands are supported as a TOML array, their entries declared by `[[…]]`.*
 
 ```toml
 [[com.heroku.phase.release]]
@@ -37,6 +29,18 @@ args = ["-c", "./bin/purge-cache"]
 ```
 
 These commands are ephemeral. No changes to the filesystem are persisted.
+
+### Release Build command
+
+*Only a single `release-build` command is supported. The entry must be declared with `[…]`.*
+
+```toml
+[com.heroku.phase.release-build]
+command = "bash"
+args = ["-c", "npm build"]
+```
+
+This command must output release artifacts into `/workspace/static-artifacts/`. The content of this directory will be stored during Release Phase by the `RELEASE_ID`, and then automatically retrieved for `web` processes, during start-up.
 
 ## Configuration: runtime environment vars
 
@@ -66,4 +70,45 @@ Artifacts are stored at the `STATIC_ARTIFACTS_URL` with the name `release-<RELEA
 
 **Required for `s3` URLs.** The access secret.
 
+## Inherited Configuration
 
+Other buildpacks can return a [Build Plan](https://github.com/buildpacks/spec/blob/main/buildpack.md#build-plan-toml) from `detect` for Release Phase configuration.
+
+Configuration defined in an app's `project.toml` takes precedence over this inherited Build Plan configuration.
+
+This example sets a `release` & `release-build` commands in the build plan, following the [project configuration](#configuration-projecttoml):
+
+```toml
+[[requires]]
+name = "release-phase"
+
+[requires.metadata.release-build]
+command = "bash"
+args = ["-c", "npm run build"]
+source = "My Awesome Buildpack"
+
+[[requires.metadata.release]]
+command = "bash"
+args = ["-c", "echo 'Hello world!'"]
+source = "My Awesome Buildpack"
+```
+
+Example using [libcnb.rs]():
+
+```rust
+fn detect(&self, context: DetectContext<Self>) -> libcnb::Result<DetectResult, Self::Error> {
+    let mut release_phase_req = Require::new("release-phase");
+    let _ = release_phase_req.metadata(toml! {
+        [release-build]
+        command = "bash"
+        args = ["-c", "npm run build"]
+        source = "My Awesome Buildpack"
+    });
+    let plan_builder = BuildPlanBuilder::new()
+        .requires(release_phase_req);
+
+    DetectResultBuilder::pass()
+        .build_plan(plan_builder.build())
+        .build()
+}
+```

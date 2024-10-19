@@ -3,6 +3,7 @@ use commons_ruby::output::build_log::{BuildLog, Logger, StartedLogger};
 use commons_ruby::output::fmt;
 use commons_ruby::output::fmt::DEBUG_INFO;
 use indoc::formatdoc;
+use libcnb::TomlFileError;
 use std::fmt::Display;
 use std::io::stdout;
 
@@ -16,6 +17,7 @@ pub(crate) enum ReleasePhaseBuildpackError {
     CannotInstallArtifactLoader(std::io::Error),
     CannotInstallCommandExecutor(std::io::Error),
     CannotCreatWebExecD(std::io::Error),
+    CannotReadProjectToml(TomlFileError),
     ConfigurationFailed(release_commands::Error),
 }
 
@@ -57,6 +59,13 @@ fn on_buildpack_error(error: ReleasePhaseBuildpackError, logger: Box<dyn Started
                 .announce()
                 .error(&formatdoc! {"
                 Cannot create exec.d/web for {buildpack_name}
+            ", buildpack_name = fmt::value(BUILDPACK_NAME) });
+        }
+        ReleasePhaseBuildpackError::CannotReadProjectToml(error) => {
+            print_error_details(logger, &error)
+                .announce()
+                .error(&formatdoc! {"
+                Error reading project.toml for {buildpack_name}
             ", buildpack_name = fmt::value(BUILDPACK_NAME) });
         }
         ReleasePhaseBuildpackError::ConfigurationFailed(error) => {
