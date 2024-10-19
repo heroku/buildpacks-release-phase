@@ -74,9 +74,16 @@ Artifacts are stored at the `STATIC_ARTIFACTS_URL` with the name `release-<RELEA
 
 Other buildpacks can return a [Build Plan](https://github.com/buildpacks/spec/blob/main/buildpack.md#build-plan-toml) from `detect` for Release Phase configuration.
 
-Configuration defined in an app's `project.toml` takes precedence over this inherited Build Plan configuration.
+The array of `release` commands defined in an app's `project.toml` and the inherited Build Plan are combined into a sequence:
+1. `release` commands inherited from the Build Plan
+2. `release` commands declared in `project.toml`.
 
-This example sets a `release` & `release-build` commands in the build plan, following the [project configuration](#configuration-projecttoml):
+Only a single `release-build` command will be executed during Release Phase:
+* the `release-build` command declared in `project.toml` takes precedence
+* otherwise `release-build` inherited from Build Plan
+* if multiple Build Plan entries declare `release-build`, the last one takes precedence.
+
+This example sets a `release` & `release-build` commands in the build plan, using the supported [project configuration](#configuration-projecttoml):
 
 ```toml
 [[requires]]
@@ -93,7 +100,7 @@ args = ["-c", "echo 'Hello world!'"]
 source = "My Awesome Buildpack"
 ```
 
-Example using [libcnb.rs]():
+Example using [libcnb.rs](https://github.com/heroku/libcnb.rs):
 
 ```rust
 fn detect(&self, context: DetectContext<Self>) -> libcnb::Result<DetectResult, Self::Error> {

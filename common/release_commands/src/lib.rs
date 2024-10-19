@@ -136,7 +136,7 @@ pub fn generate_commands_config(
         .try_into::<ReleaseCommands>()
         .map_err(Error::TomlProjectDeserializeError)?;
 
-    // Create secondary, inherited command config from Bluild Plan
+    // Create secondary, inherited command config from Build Plan
     let inherited_commands = config_to_inherit
         .try_into::<ReleaseCommands>()
         .map_err(Error::TomlBuildPlanDeserializeError)?;
