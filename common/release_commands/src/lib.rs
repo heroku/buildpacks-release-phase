@@ -56,6 +56,7 @@ impl fmt::Display for Executable {
 pub enum Error {
     ReleaseCommandsMustBeArray,
     ReleaseBuildCommandMustBeTable,
+    TomlBuildPlanDeserializeError(toml::de::Error),
     TomlProjectFileError(TomlFileError),
     TomlReleaseCommandsFileError(TomlFileError),
     TomlProjectDeserializeError(toml::de::Error),
@@ -76,6 +77,12 @@ impl fmt::Display for Error {
                 f,
                 "Configuration of `release-build` must be a single command."
             ),
+            Error::TomlBuildPlanDeserializeError(error) => {
+                write!(
+                    f,
+                    "Configuration error in Build Plan [requires.metadata], {error:#?}"
+                )
+            }
             Error::TomlProjectFileError(error) => {
                 write!(f, "Failure reading `project.toml`, {error:#?}")
             }
@@ -104,34 +111,50 @@ impl fmt::Display for Error {
     }
 }
 
-pub fn generate_commands_config(project_toml_path: &Path) -> Result<ReleaseCommands, Error> {
-    let project_toml = if project_toml_path.is_file() {
-        read_toml_file::<toml::Value>(project_toml_path).map_err(Error::TomlProjectFileError)?
-    } else {
-        toml::Table::new().into()
-    };
-
-    let mut commands_toml = toml::Table::new();
+pub fn generate_commands_config(
+    project_config: &toml::Value,
+    config_to_inherit: toml::map::Map<String, toml::Value>,
+) -> Result<ReleaseCommands, Error> {
+    // Extract the namespaced keys from project.toml
+    let mut project_commands = toml::Table::new();
     if let Some(release_config) =
-        toml_select_value(vec!["com", "heroku", "phase", "release"], &project_toml).cloned()
+        toml_select_value(vec!["com", "heroku", "phase", "release"], project_config).cloned()
     {
-        commands_toml.insert("release".to_string(), release_config);
+        project_commands.insert("release".to_string(), release_config);
     };
     if let Some(release_build_config) = toml_select_value(
         vec!["com", "heroku", "phase", "release-build"],
-        &project_toml,
+        project_config,
     )
     .cloned()
     {
-        commands_toml.insert("release-build".to_string(), release_build_config);
+        project_commands.insert("release-build".to_string(), release_build_config);
     };
 
-    let mut commands = commands_toml
+    // Create main command config from project
+    let mut commands = project_commands
         .try_into::<ReleaseCommands>()
         .map_err(Error::TomlProjectDeserializeError)?;
 
+    // Create secondary, inherited command config from Build Plan
+    let inherited_commands = config_to_inherit
+        .try_into::<ReleaseCommands>()
+        .map_err(Error::TomlBuildPlanDeserializeError)?;
+
+    // Combine inherited + project release commands
+    if let Some(inherited) = inherited_commands.release {
+        commands.release = commands.release.map_or(Some(inherited.clone()), |project| {
+            Some([inherited, project].concat())
+        });
+    }
+
+    // Inherit the release-build command if none defined for project
+    if commands.release_build.is_none() {
+        commands.release_build = inherited_commands.release_build;
+    }
+
+    // When Release Build is defined, add the artifacts saver exec as the first release command, immediately after release-build
     if commands.release_build.is_some() {
-        // Add the saver as the first release command, immediately after release-build.
         let save_exec = Executable {
             command: "save-release-artifacts".to_string(),
             args: Some(vec!["static-artifacts/".to_string()]),
@@ -178,60 +201,57 @@ mod tests {
     use crate::ReleaseCommands;
 
     #[test]
-    fn reads_project_toml_for_release_commands() {
-        let project_config = generate_commands_config(
-            PathBuf::from(
-                "../../buildpacks/release-phase/tests/fixtures/project_uses_release/project.toml",
-            )
-            .as_path(),
-        )
-        .unwrap();
+    fn generate_commands_config_for_project_release() {
+        let project_config: toml::Value = toml! {
+            [[com.heroku.phase.release]]
+            command = "bash"
+            args = ["-c", "echo '1'"]
+
+            [[com.heroku.phase.release]]
+            command = "bash"
+            args = ["-c", "echo '2'"]
+        }
+        .into();
+        let inherit_config = toml::Table::new();
+        let result = generate_commands_config(&project_config, inherit_config).unwrap();
         assert_eq!(
-            project_config.release,
+            result.release,
             Some(vec![
                 Executable {
                     command: "bash".to_string(),
-                    args: Some(vec![
-                        "-c".to_string(),
-                        "echo 'Hello from Release Phase Buildpack!'".to_string()
-                    ]),
+                    args: Some(vec!["-c".to_string(), "echo '1'".to_string()]),
                     source: None,
                 },
                 Executable {
                     command: "bash".to_string(),
-                    args: Some(vec![
-                        "-c".to_string(),
-                        "echo 'Hello again from Release Phase Buildpack!'".to_string()
-                    ]),
+                    args: Some(vec!["-c".to_string(), "echo '2'".to_string()]),
                     source: None,
                 }
             ])
         );
-        assert_eq!(project_config.release_build, None);
+        assert_eq!(result.release_build, None);
     }
 
     #[test]
-    fn reads_project_toml_for_release_build_command() {
-        let project_config = generate_commands_config(
-            PathBuf::from(
-                "../../buildpacks/release-phase/tests/fixtures/project_uses_release_build/project.toml",
-            )
-            .as_path(),
-        )
-        .unwrap();
+    fn generate_commands_config_for_project_release_build() {
+        let project_config: toml::Value = toml! {
+                    [com.heroku.phase.release-build]
+        command = "bash"
+        args = ["-c", "echo 'test build'"]
+                }
+        .into();
+        let inherit_config = toml::Table::new();
+        let result = generate_commands_config(&project_config, inherit_config).unwrap();
         assert_eq!(
-            project_config.release_build,
+            result.release_build,
             Some(Executable {
                 command: "bash".to_string(),
-                args: Some(vec![
-                    "-c".to_string(),
-                    "echo 'Build in Release Phase Buildpack!'; mkdir -p /workspace/static-artifacts; echo 'Hello static world!' > /workspace/static-artifacts/note.txt".to_string()
-                ]),
+                args: Some(vec!["-c".to_string(), "echo 'test build'".to_string()]),
                 source: None,
             })
         );
         assert_eq!(
-            project_config.release,
+            result.release,
             Some(vec![Executable {
                 command: "save-release-artifacts".to_string(),
                 args: Some(vec!["static-artifacts/".to_string()]),
@@ -241,20 +261,204 @@ mod tests {
     }
 
     #[test]
-    fn no_project_toml() {
-        let project_config = generate_commands_config(
-            PathBuf::from(
-                "../../buildpacks/release-phase/tests/fixtures/no_project_toml/project.toml",
-            )
-            .as_path(),
-        )
-        .unwrap();
-        assert!(project_config.release.is_none());
-        assert!(project_config.release_build.is_none());
+    fn generate_commands_config_when_not_defined() {
+        let project_config: toml::Value = toml! {
+            [some_other_key]
+            test = true
+        }
+        .into();
+        let inherit_config = toml::Table::new();
+        let result = generate_commands_config(&project_config, inherit_config).unwrap();
+        assert!(result.release.is_none());
+        assert!(result.release_build.is_none());
     }
 
     #[test]
-    fn reads_commands_toml_for_release_commands() {
+    fn generate_commands_config_combined_from_build_plan_and_project() {
+        let project_config: toml::Value = toml! {
+            [[com.heroku.phase.release]]
+            command = "project1"
+
+            [[com.heroku.phase.release]]
+            command = "project2"
+        }
+        .into();
+
+        let mut inherit_commands = toml::value::Array::new();
+        let mut inherit_command_1 = toml::Table::new();
+        inherit_command_1.insert("command".to_string(), "buildplan1".to_string().into());
+        inherit_commands.push(inherit_command_1.into());
+        let mut inherit_command_2 = toml::Table::new();
+        inherit_command_2.insert("command".to_string(), "buildplan2".to_string().into());
+        inherit_commands.push(inherit_command_2.into());
+        let mut inherit_config = toml::Table::new();
+        inherit_config.insert("release".to_string(), inherit_commands.into());
+
+        let result = generate_commands_config(&project_config, inherit_config).unwrap();
+        assert_eq!(
+            result.release,
+            Some(vec![
+                Executable {
+                    command: "buildplan1".to_string(),
+                    args: None,
+                    source: None,
+                },
+                Executable {
+                    command: "buildplan2".to_string(),
+                    args: None,
+                    source: None,
+                },
+                Executable {
+                    command: "project1".to_string(),
+                    args: None,
+                    source: None,
+                },
+                Executable {
+                    command: "project2".to_string(),
+                    args: None,
+                    source: None,
+                }
+            ])
+        );
+        assert_eq!(result.release_build, None);
+    }
+
+    #[test]
+    fn generate_commands_config_for_release_build_when_inherited_from_build_plan() {
+        let project_config: toml::Value = toml! {
+            [some_other_key]
+            test = true
+        }
+        .into();
+
+        let mut inherit_build_command = toml::Table::new();
+        inherit_build_command.insert("command".to_string(), "buildplan1".to_string().into());
+        let mut inherit_config = toml::Table::new();
+        inherit_config.insert("release-build".to_string(), inherit_build_command.into());
+
+        let result = generate_commands_config(&project_config, inherit_config).unwrap();
+        assert_eq!(
+            result.release_build,
+            Some(Executable {
+                command: "buildplan1".to_string(),
+                args: None,
+                source: None,
+            })
+        );
+        assert_eq!(
+            result.release,
+            Some(vec![Executable {
+                command: "save-release-artifacts".to_string(),
+                args: Some(vec!["static-artifacts/".to_string()]),
+                source: Some("Heroku Release Phase Buildpack".to_string()),
+            }])
+        );
+    }
+
+    #[test]
+    fn generate_commands_config_for_release_build_when_project_takes_precedence() {
+        let project_config: toml::Value = toml! {
+            [com.heroku.phase.release-build]
+            command = "project1"
+        }
+        .into();
+
+        let mut inherit_build_command = toml::Table::new();
+        inherit_build_command.insert("command".to_string(), "buildplan1".to_string().into());
+        let mut inherit_config = toml::Table::new();
+        inherit_config.insert("release-build".to_string(), inherit_build_command.into());
+
+        let result = generate_commands_config(&project_config, inherit_config).unwrap();
+        assert_eq!(
+            result.release_build,
+            Some(Executable {
+                command: "project1".to_string(),
+                args: None,
+                source: None,
+            })
+        );
+        assert_eq!(
+            result.release,
+            Some(vec![Executable {
+                command: "save-release-artifacts".to_string(),
+                args: Some(vec!["static-artifacts/".to_string()]),
+                source: Some("Heroku Release Phase Buildpack".to_string()),
+            }])
+        );
+    }
+
+    #[test]
+    fn generate_commands_config_combined_all() {
+        let project_config: toml::Value = toml! {
+            [[com.heroku.phase.release]]
+            command = "project1"
+
+            [[com.heroku.phase.release]]
+            command = "project2"
+
+            [com.heroku.phase.release-build]
+            command = "projectbuild1"
+        }
+        .into();
+
+        let mut inherit_commands = toml::value::Array::new();
+        let mut inherit_command_1 = toml::Table::new();
+        inherit_command_1.insert("command".to_string(), "buildplan1".to_string().into());
+        inherit_commands.push(inherit_command_1.into());
+        let mut inherit_command_2 = toml::Table::new();
+        inherit_command_2.insert("command".to_string(), "buildplan2".to_string().into());
+        inherit_commands.push(inherit_command_2.into());
+
+        let mut inherit_build_command = toml::Table::new();
+        inherit_build_command.insert("command".to_string(), "buildplan1".to_string().into());
+
+        let mut inherit_config = toml::Table::new();
+        inherit_config.insert("release-build".to_string(), inherit_build_command.into());
+        inherit_config.insert("release".to_string(), inherit_commands.into());
+
+        let result = generate_commands_config(&project_config, inherit_config).unwrap();
+        assert_eq!(
+            result.release,
+            Some(vec![
+                Executable {
+                    command: "save-release-artifacts".to_string(),
+                    args: Some(vec!["static-artifacts/".to_string()]),
+                    source: Some("Heroku Release Phase Buildpack".to_string()),
+                },
+                Executable {
+                    command: "buildplan1".to_string(),
+                    args: None,
+                    source: None,
+                },
+                Executable {
+                    command: "buildplan2".to_string(),
+                    args: None,
+                    source: None,
+                },
+                Executable {
+                    command: "project1".to_string(),
+                    args: None,
+                    source: None,
+                },
+                Executable {
+                    command: "project2".to_string(),
+                    args: None,
+                    source: None,
+                }
+            ])
+        );
+        assert_eq!(
+            result.release_build,
+            Some(Executable {
+                command: "projectbuild1".to_string(),
+                args: None,
+                source: None,
+            })
+        );
+    }
+
+    #[test]
+    fn read_commands_config_for_release_commands() {
         let commands_config = read_commands_config(
             PathBuf::from("tests/fixtures/uses_release/release-commands.toml").as_path(),
         )
@@ -284,7 +488,7 @@ mod tests {
     }
 
     #[test]
-    fn reads_commands_toml_for_release_build_command() {
+    fn read_commands_config_for_release_build_command() {
         let commands_config = read_commands_config(
             PathBuf::from("tests/fixtures/uses_release_build/release-commands.toml").as_path(),
         )
@@ -304,7 +508,7 @@ mod tests {
     }
 
     #[test]
-    fn no_commands_toml() {
+    fn read_commands_config_when_undefined() {
         let commands_config = read_commands_config(
             PathBuf::from("tests/fixtures/no_commands_toml/release-commands.toml").as_path(),
         )
@@ -315,51 +519,42 @@ mod tests {
 
     // The write tests all touch the same file, so run them sequentially.
     #[test]
-    fn writes_commands_toml_all() {
-        writes_commands_toml();
-        writes_empty_commands_toml();
+    fn write_commands_config_all() {
+        write_commands_config_succeeds();
+        write_commands_config_succeeds_when_empty();
     }
 
-    fn writes_commands_toml() {
+    fn write_commands_config_succeeds() {
         let expected_config: toml::Value = toml! {
             [[release]]
             command = "bash"
-            args = ["-c", "echo 'Release in write test'"]
+            args = ["-c", "echo '1'"]
 
             [[release]]
             command = "bash"
-            args = ["-c", "echo 'Another release command in write test'"]
+            args = ["-c", "echo '2'"]
 
             [release-build]
             command = "bash"
-            args = ["-c", "echo 'Release Build in write test'"]
+            args = ["-c", "echo '3'"]
         }
         .into();
         let release_commands = ReleaseCommands {
             release: Some(vec![
                 Executable {
                     command: "bash".to_string(),
-                    args: Some(vec![
-                        "-c".to_string(),
-                        "echo 'Release in write test'".to_string(),
-                    ]),
+                    args: Some(vec!["-c".to_string(), "echo '1'".to_string()]),
                     source: None,
                 },
                 Executable {
                     command: "bash".to_string(),
-                    args: Some(vec![
-                        "-c".to_string(),
-                        "echo 'Another release command in write test'".to_string(),
-                    ]),
+                    args: Some(vec!["-c".to_string(), "echo '2'".to_string()]),
                     source: None,
                 },
             ]),
             release_build: Some(Executable {
                 command: "bash".to_string(),
-                args: Some(vec![
-                    "-c".to_string(),
-                    "echo 'Release Build in write test'".to_string(),
-                ]),
+                args: Some(vec!["-c".to_string(), "echo '3'".to_string()]),
                 source: None,
             }),
         };
@@ -382,7 +577,7 @@ mod tests {
         );
     }
 
-    fn writes_empty_commands_toml() {
+    fn write_commands_config_succeeds_when_empty() {
         let release_commands = ReleaseCommands {
             release: None,
             release_build: None,

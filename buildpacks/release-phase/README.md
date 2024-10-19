@@ -14,17 +14,9 @@ schema-version = "0.2"
 uri = "heroku/release-phase"
 ```
 
-### Release Build command
-
-```toml
-[com.heroku.phase.release-build]
-command = "bash"
-args = ["-c", "npm build"]
-```
-
-This command must output release artifacts into `/workspace/static-artifacts/`. The content of this directory will be stored during Release Phase by the `RELEASE_ID`, and then automatically retrieved for `web` processes, during start-up.
-
 ### Release commands
+
+*Multiple `release` commands are supported as a TOML array, their entries declared by `[[…]]`.*
 
 ```toml
 [[com.heroku.phase.release]]
@@ -37,6 +29,18 @@ args = ["-c", "./bin/purge-cache"]
 ```
 
 These commands are ephemeral. No changes to the filesystem are persisted.
+
+### Release Build command
+
+*Only a single `release-build` command is supported. The entry must be declared with `[…]`.*
+
+```toml
+[com.heroku.phase.release-build]
+command = "bash"
+args = ["-c", "npm build"]
+```
+
+This command must output release artifacts into `/workspace/static-artifacts/`. The content of this directory will be stored during Release Phase by the `RELEASE_ID`, and then automatically retrieved for `web` processes, during start-up.
 
 ## Configuration: runtime environment vars
 
@@ -66,4 +70,52 @@ Artifacts are stored at the `STATIC_ARTIFACTS_URL` with the name `release-<RELEA
 
 **Required for `s3` URLs.** The access secret.
 
+## Inherited Configuration
 
+Other buildpacks can return a [Build Plan](https://github.com/buildpacks/spec/blob/main/buildpack.md#build-plan-toml) from `detect` for Release Phase configuration.
+
+The array of `release` commands defined in an app's `project.toml` and the inherited Build Plan are combined into a sequence:
+1. `release` commands inherited from the Build Plan
+2. `release` commands declared in `project.toml`.
+
+Only a single `release-build` command will be executed during Release Phase:
+* the `release-build` command declared in `project.toml` takes precedence
+* otherwise `release-build` inherited from Build Plan
+* if multiple Build Plan entries declare `release-build`, the last one takes precedence.
+
+This example sets a `release` & `release-build` commands in the build plan, using the supported [project configuration](#configuration-projecttoml):
+
+```toml
+[[requires]]
+name = "release-phase"
+
+[requires.metadata.release-build]
+command = "bash"
+args = ["-c", "npm run build"]
+source = "My Awesome Buildpack"
+
+[[requires.metadata.release]]
+command = "bash"
+args = ["-c", "echo 'Hello world!'"]
+source = "My Awesome Buildpack"
+```
+
+Example using [libcnb.rs](https://github.com/heroku/libcnb.rs):
+
+```rust
+fn detect(&self, context: DetectContext<Self>) -> libcnb::Result<DetectResult, Self::Error> {
+    let mut release_phase_req = Require::new("release-phase");
+    let _ = release_phase_req.metadata(toml! {
+        [release-build]
+        command = "bash"
+        args = ["-c", "npm run build"]
+        source = "My Awesome Buildpack"
+    });
+    let plan_builder = BuildPlanBuilder::new()
+        .requires(release_phase_req);
+
+    DetectResultBuilder::pass()
+        .build_plan(plan_builder.build())
+        .build()
+}
+```

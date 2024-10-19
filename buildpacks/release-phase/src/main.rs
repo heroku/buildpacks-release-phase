@@ -3,6 +3,7 @@ mod setup_release_phase;
 
 use crate::errors::{on_error, ReleasePhaseBuildpackError};
 use libcnb::build::{BuildContext, BuildResult, BuildResultBuilder};
+use libcnb::data::build_plan::{BuildPlanBuilder, Require};
 use libcnb::data::launch::{LaunchBuilder, ProcessBuilder};
 use libcnb::data::process_type;
 use libcnb::detect::{DetectContext, DetectResult, DetectResultBuilder};
@@ -33,7 +34,13 @@ impl Buildpack for ReleasePhaseBuildpack {
     type Error = ReleasePhaseBuildpackError;
 
     fn detect(&self, _context: DetectContext<Self>) -> libcnb::Result<DetectResult, Self::Error> {
-        DetectResultBuilder::pass().build()
+        let plan_builder = BuildPlanBuilder::new()
+            .provides("release-phase")
+            .requires(Require::new("release-phase"));
+
+        DetectResultBuilder::pass()
+            .build_plan(plan_builder.build())
+            .build()
     }
 
     fn build(&self, context: BuildContext<Self>) -> libcnb::Result<BuildResult, Self::Error> {

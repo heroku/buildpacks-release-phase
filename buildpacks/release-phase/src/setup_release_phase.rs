@@ -1,12 +1,13 @@
 use std::fs;
 
 use crate::{ReleasePhaseBuildpack, ReleasePhaseBuildpackError};
-use libcnb::additional_buildpack_binary_path;
 use libcnb::data::layer_name;
 use libcnb::layer::LayerRef;
+use libcnb::{additional_buildpack_binary_path, read_toml_file};
 use libcnb::{build::BuildContext, layer::UncachedLayerDefinition};
 use libherokubuildpack::log::log_info;
 use release_commands::{generate_commands_config, write_commands_config};
+use toml::Table;
 
 pub(crate) fn setup_release_phase(
     context: &BuildContext<ReleasePhaseBuildpack>,
@@ -14,7 +15,24 @@ pub(crate) fn setup_release_phase(
     Option<LayerRef<ReleasePhaseBuildpack, (), ()>>,
     libcnb::Error<ReleasePhaseBuildpackError>,
 > {
-    let commands_config = generate_commands_config(&context.app_dir.join("project.toml"))
+    let project_toml_path = &context.app_dir.join("project.toml");
+    let project_toml = if project_toml_path.is_file() {
+        read_toml_file::<toml::Value>(project_toml_path)
+            .map_err(ReleasePhaseBuildpackError::CannotReadProjectToml)?
+    } else {
+        toml::Table::new().into()
+    };
+
+    // Load a table of Build Plan [requires.metadata] from context.
+    // When a key is defined multiple times, the last one wins.
+    let mut build_plan_config = Table::new();
+    context.buildpack_plan.entries.iter().for_each(|e| {
+        e.metadata.iter().for_each(|(k, v)| {
+            build_plan_config.insert(k.to_owned(), v.to_owned());
+        });
+    });
+
+    let commands_config = generate_commands_config(&project_toml, build_plan_config)
         .map_err(ReleasePhaseBuildpackError::ConfigurationFailed)?;
 
     if commands_config.release.is_none() && commands_config.release_build.is_none() {
