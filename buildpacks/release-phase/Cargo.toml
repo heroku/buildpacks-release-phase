@@ -7,7 +7,7 @@ edition.workspace = true
 workspace = true
 
 [dependencies]
-libcnb = "0.22.0"
+libcnb = { git = "https://github.com/mars/libcnb.rs.git", branch = "docker-volume" }
 commons_ruby = { git = "https://github.com/heroku/buildpacks-ruby", branch = "main", package = "commons" }
 libherokubuildpack = { version = "=0.22.0", default-features = false, features = ["fs", "log"] }
 indoc = "2"
@@ -17,5 +17,6 @@ tokio = { version = "1.40.0", features = ["macros", "rt-multi-thread"] }
 toml = { version = "0.8", features = ["preserve_order"] }
 
 [dev-dependencies]
-libcnb-test = "=0.22.0"
+libcnb-test = { git = "https://github.com/mars/libcnb.rs.git", branch = "docker-volume" }
 test_support.workspace = true
+uuid = { version = "1.10.0", features = ["v4", "serde"] }

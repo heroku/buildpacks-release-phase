@@ -40,6 +40,26 @@ pub fn release_phase_integration_test_with_config(
     );
 }
 
+pub fn release_phase_and_procfile_integration_test(fixture: &str, test_body: fn(TestContext)) {
+    release_phase_and_procfile_integration_test_with_config(fixture, |_| {}, test_body);
+}
+
+pub fn release_phase_and_procfile_integration_test_with_config(
+    fixture: &str,
+    with_config: fn(&mut BuildConfig),
+    test_body: fn(TestContext),
+) {
+    integration_test_with_config(
+        fixture,
+        with_config,
+        test_body,
+        &[
+            BuildpackReference::WorkspaceBuildpack(buildpack_id!("heroku/release-phase")),
+            BuildpackReference::Other("heroku/procfile".to_owned()),
+        ],
+    );
+}
+
 fn integration_test_with_config(
     fixture: &str,
     with_config: fn(&mut BuildConfig),

@@ -18,6 +18,8 @@ use setup_release_phase::setup_release_phase;
 use libcnb_test as _;
 #[cfg(test)]
 use test_support as _;
+#[cfg(test)]
+use uuid as _;
 
 // Silence unused dependency warning for
 // dependencies used in bin/ executables
