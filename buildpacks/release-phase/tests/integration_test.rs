@@ -69,7 +69,7 @@ fn project_uses_release_build_and_web_process_loads_artifacts() {
             let unique = Uuid::new_v4();
             let local_storage_tmp_dir = tempdir().unwrap();
             let local_storage_path = local_storage_tmp_dir.path().to_str().unwrap();
-            let container_volume_path = "/workspace/static-artifacts-storage";
+            let container_volume_path = "/static-artifacts-storage";
             let container_volume_url = "file://".to_owned() + container_volume_path;
             let volume = local_storage_path.to_owned() + ":" + container_volume_path;
 
