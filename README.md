@@ -1,10 +1,10 @@
 # Heroku Cloud Native Buildpacks: Release Phase
 
-🚧 **This repo is under-construction,** not yet functional. 🚧
+🚧 **This repo is experimental.** Use at your own risk. 🚧
 
 This repository is the home of Heroku Cloud Native Buildpacks for Release Phase, the mechanism offered by Heroku to execute code for each App Release, such as builds, pipeline promotions, and config var changes. Release Phase provides a hook useful for automating deployments, such as database migrations, object storage for caching, and other application-specific operations.
 
-This buildpack enhances Release Phase capabilities to support multiple, ordered `release` commands and `release-build` for [Front-end Web apps](https://github.com/heroku/buildpacks-frontend-web).
+This buildpack enhances Release Phase capabilities to support multiple, ordered `release` commands and `release-build` for generating static web artifacts during Release Phase.
 
 ## Included Buildpacks
 
