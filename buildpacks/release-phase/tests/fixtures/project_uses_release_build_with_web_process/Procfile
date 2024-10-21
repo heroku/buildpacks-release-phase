@@ -1,0 +1,1 @@
+web: /bin/bash -c "echo \"STATIC_ARTIFACTS_LOADED_FROM_KEY=$STATIC_ARTIFACTS_LOADED_FROM_KEY\" && cat static-artifacts/note.txt"

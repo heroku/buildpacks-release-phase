@@ -57,9 +57,10 @@ pub async fn load<S: BuildHasher>(
             guard_file(env)?;
             let archive_name = generate_archive_name::<S>(env);
             eprintln!("load-release-artifacts reading archive: {archive_name}");
+            // This file scheme does not currently find latest if the specific release ID is missing.
             let source_path = generate_file_storage_location(env, &archive_name)?;
             extract_archive(&source_path, dir)?;
-            Ok(source_path.to_string_lossy().to_string())
+            Ok(archive_name.to_string())
         }
         Ok(scheme) if scheme == *"s3" => {
             guard_s3(env)?;

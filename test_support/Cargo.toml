@@ -7,6 +7,6 @@ edition.workspace = true
 workspace = true
 
 [dependencies]
-libcnb = "=0.22.0"
-libcnb-test = "=0.22.0"
+libcnb = { git = "https://github.com/mars/libcnb.rs.git", branch = "docker-volume" }
+libcnb-test = { git = "https://github.com/mars/libcnb.rs.git", branch = "docker-volume" }
 ureq = "2"
