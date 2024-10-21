@@ -2,6 +2,7 @@
 #![allow(unused_crate_dependencies)]
 
 use libcnb_test::{assert_contains, ContainerConfig};
+use std::path::PathBuf;
 use tempfile::tempdir;
 use test_support::{
     release_phase_and_procfile_integration_test, release_phase_integration_test,
@@ -68,10 +69,9 @@ fn project_uses_release_build_and_web_process_loads_artifacts() {
         |ctx| {
             let unique = Uuid::new_v4();
             let local_storage_tmp_dir = tempdir().unwrap();
-            let local_storage_path = local_storage_tmp_dir.path().to_str().unwrap();
-            let container_volume_path = "/static-artifacts-storage";
-            let container_volume_url = "file://".to_owned() + container_volume_path;
-            let volume = local_storage_path.to_owned() + ":" + container_volume_path;
+            let container_volume_path = PathBuf::from("/static-artifacts-storage");
+            let container_volume_url =
+                format!("file://{}", &container_volume_path.to_string_lossy());
 
             assert_contains!(ctx.pack_stdout, "Procfile");
             assert_contains!(ctx.pack_stdout, "Release Phase");
@@ -81,7 +81,7 @@ fn project_uses_release_build_and_web_process_loads_artifacts() {
                 ContainerConfig::new()
                     .env("RELEASE_ID", unique)
                     .env("STATIC_ARTIFACTS_URL", &container_volume_url)
-                    .volumes([volume.clone()]),
+                    .volume(&local_storage_tmp_dir, &container_volume_path),
                 &"release".to_string(),
                 |container| {
                     let log_output = container.logs_now();
@@ -100,7 +100,7 @@ fn project_uses_release_build_and_web_process_loads_artifacts() {
                 ContainerConfig::new()
                     .env("RELEASE_ID", unique)
                     .env("STATIC_ARTIFACTS_URL", &container_volume_url)
-                    .volumes([volume.clone()]),
+                    .volume(&local_storage_tmp_dir, &container_volume_path),
                 &"web".to_string(),
                 |container| {
                     let log_output = container.logs_now();
