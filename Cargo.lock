@@ -1943,6 +1943,7 @@ dependencies = [
  "libherokubuildpack 0.22.0",
  "release_artifacts",
  "release_commands",
+ "tempfile",
  "test_support",
  "tokio",
  "toml",

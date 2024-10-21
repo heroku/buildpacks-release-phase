@@ -17,6 +17,8 @@ use setup_release_phase::setup_release_phase;
 #[cfg(test)]
 use libcnb_test as _;
 #[cfg(test)]
+use tempfile as _;
+#[cfg(test)]
 use test_support as _;
 #[cfg(test)]
 use uuid as _;

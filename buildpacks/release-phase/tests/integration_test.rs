@@ -1,9 +1,8 @@
 // Required due to: https://github.com/rust-lang/rust/issues/95513
 #![allow(unused_crate_dependencies)]
 
-use std::fs;
-
 use libcnb_test::{assert_contains, ContainerConfig};
+use tempfile::tempdir;
 use test_support::{
     release_phase_and_procfile_integration_test, release_phase_integration_test,
     start_container_entrypoint,
@@ -68,10 +67,15 @@ fn project_uses_release_build_and_web_process_loads_artifacts() {
         "./fixtures/project_uses_release_build_with_web_process",
         |ctx| {
             let unique = Uuid::new_v4();
-            let local_storage_path = "./.integration-test-static-artifacts-storage";
+            let local_storage_path =
+                tempdir().expect("should create temporary directory for artifact storage");
             let container_volume_path = "/static-artifacts-storage";
             let container_volume_url = "file://".to_owned() + container_volume_path;
-            let volume = local_storage_path.to_owned() + ":" + container_volume_path;
+            let volume = format!(
+                "{}:{}",
+                local_storage_path.into_path().to_string_lossy(),
+                container_volume_path
+            );
 
             assert_contains!(ctx.pack_stdout, "Procfile");
             assert_contains!(ctx.pack_stdout, "Release Phase");
@@ -112,8 +116,6 @@ fn project_uses_release_build_and_web_process_loads_artifacts() {
                     assert_contains!(log_output.stdout, "Hello static world!");
                 },
             );
-            fs::remove_file(format!("{local_storage_path}/release-{unique}.tgz"))
-                .expect("the generated test archive can be deleted");
         },
     );
 }

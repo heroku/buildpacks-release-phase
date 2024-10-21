@@ -18,5 +18,6 @@ toml = { version = "0.8", features = ["preserve_order"] }
 
 [dev-dependencies]
 libcnb-test = { git = "https://github.com/mars/libcnb.rs.git", branch = "docker-volume" }
+tempfile = "3"
 test_support.workspace = true
 uuid = { version = "1.10.0", features = ["v4", "serde"] }

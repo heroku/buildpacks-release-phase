@@ -8,5 +8,3 @@ packaged/
 *.cnb
 
 .DS_Store
-
-.integration-test-static-artifacts-storage/
