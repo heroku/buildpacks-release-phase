@@ -29,6 +29,7 @@ use release_artifacts as _;
 use tokio as _;
 
 const BUILDPACK_NAME: &str = "Heroku Release Phase Buildpack";
+const BUILD_PLAN_ID: &str = "release-phase";
 
 pub(crate) struct ReleasePhaseBuildpack;
 
@@ -39,8 +40,8 @@ impl Buildpack for ReleasePhaseBuildpack {
 
     fn detect(&self, _context: DetectContext<Self>) -> libcnb::Result<DetectResult, Self::Error> {
         let plan_builder = BuildPlanBuilder::new()
-            .provides("release-phase")
-            .requires(Require::new("release-phase"));
+            .provides(BUILD_PLAN_ID)
+            .requires(Require::new(BUILD_PLAN_ID));
 
         DetectResultBuilder::pass()
             .build_plan(plan_builder.build())
