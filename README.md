@@ -47,4 +47,4 @@ docker run -it cnb-release-phase-test bash
 
 1. Run **Prepare Buildpack Releases**.
 1. Await completion of the preparation step.
-1. ~~Run **Release Buildpacks**.~~ (This will not work until the repo is public, open-source. Until then, [manually pack & release the builder](builder/README.md#internal-release-process)))
+1. Run **Release Buildpacks**.
