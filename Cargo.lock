@@ -1387,7 +1387,7 @@ dependencies = [
 [[package]]
 name = "libcnb"
 version = "0.24.0"
-source = "git+https://github.com/heroku/libcnb.rs.git?branch=support-docker-volume-mounts#28deae44d363ab2f6a4116c05af749b6497e5253"
+source = "git+https://github.com/heroku/libcnb.rs.git?branch=support-docker-volume-mounts#9d6aea92e24707ad89b8eecf469ed99b9a6ad3f0"
 dependencies = [
  "libcnb-common 0.24.0",
  "libcnb-data 0.24.0",
@@ -1411,7 +1411,7 @@ dependencies = [
 [[package]]
 name = "libcnb-common"
 version = "0.24.0"
-source = "git+https://github.com/heroku/libcnb.rs.git?branch=support-docker-volume-mounts#28deae44d363ab2f6a4116c05af749b6497e5253"
+source = "git+https://github.com/heroku/libcnb.rs.git?branch=support-docker-volume-mounts#9d6aea92e24707ad89b8eecf469ed99b9a6ad3f0"
 dependencies = [
  "serde",
  "thiserror",
@@ -1435,7 +1435,7 @@ dependencies = [
 [[package]]
 name = "libcnb-data"
 version = "0.24.0"
-source = "git+https://github.com/heroku/libcnb.rs.git?branch=support-docker-volume-mounts#28deae44d363ab2f6a4116c05af749b6497e5253"
+source = "git+https://github.com/heroku/libcnb.rs.git?branch=support-docker-volume-mounts#9d6aea92e24707ad89b8eecf469ed99b9a6ad3f0"
 dependencies = [
  "fancy-regex",
  "libcnb-proc-macros 0.24.0",
@@ -1448,7 +1448,7 @@ dependencies = [
 [[package]]
 name = "libcnb-package"
 version = "0.24.0"
-source = "git+https://github.com/heroku/libcnb.rs.git?branch=support-docker-volume-mounts#28deae44d363ab2f6a4116c05af749b6497e5253"
+source = "git+https://github.com/heroku/libcnb.rs.git?branch=support-docker-volume-mounts#9d6aea92e24707ad89b8eecf469ed99b9a6ad3f0"
 dependencies = [
  "cargo_metadata",
  "ignore",
@@ -1476,7 +1476,7 @@ dependencies = [
 [[package]]
 name = "libcnb-proc-macros"
 version = "0.24.0"
-source = "git+https://github.com/heroku/libcnb.rs.git?branch=support-docker-volume-mounts#28deae44d363ab2f6a4116c05af749b6497e5253"
+source = "git+https://github.com/heroku/libcnb.rs.git?branch=support-docker-volume-mounts#9d6aea92e24707ad89b8eecf469ed99b9a6ad3f0"
 dependencies = [
  "cargo_metadata",
  "fancy-regex",
@@ -1487,7 +1487,7 @@ dependencies = [
 [[package]]
 name = "libcnb-test"
 version = "0.24.0"
-source = "git+https://github.com/heroku/libcnb.rs.git?branch=support-docker-volume-mounts#28deae44d363ab2f6a4116c05af749b6497e5253"
+source = "git+https://github.com/heroku/libcnb.rs.git?branch=support-docker-volume-mounts#9d6aea92e24707ad89b8eecf469ed99b9a6ad3f0"
 dependencies = [
  "fastrand",
  "fs_extra",

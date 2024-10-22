@@ -81,7 +81,7 @@ fn project_uses_release_build_and_web_process_loads_artifacts() {
                 ContainerConfig::new()
                     .env("RELEASE_ID", unique)
                     .env("STATIC_ARTIFACTS_URL", &container_volume_url)
-                    .volume(&local_storage_tmp_dir, &container_volume_path),
+                    .bind_mount(local_storage_tmp_dir.path(), &container_volume_path),
                 &"release".to_string(),
                 |container| {
                     let log_output = container.logs_now();
@@ -100,7 +100,7 @@ fn project_uses_release_build_and_web_process_loads_artifacts() {
                 ContainerConfig::new()
                     .env("RELEASE_ID", unique)
                     .env("STATIC_ARTIFACTS_URL", &container_volume_url)
-                    .volume(&local_storage_tmp_dir, &container_volume_path),
+                    .bind_mount(local_storage_tmp_dir.path(), &container_volume_path),
                 &"web".to_string(),
                 |container| {
                     let log_output = container.logs_now();
