@@ -1,6 +1,8 @@
 // Required due to: https://github.com/rust-lang/rust/issues/95513
 #![allow(unused_crate_dependencies)]
 
+use std::{fs, os::unix::fs::PermissionsExt};
+
 use libcnb_test::{assert_contains, ContainerConfig};
 use tempfile::tempdir;
 use test_support::{
@@ -67,8 +69,24 @@ fn project_uses_release_build_and_web_process_loads_artifacts() {
         "./fixtures/project_uses_release_build_with_web_process",
         |ctx| {
             let unique = Uuid::new_v4();
-            let local_storage_path =
+
+            let temp_dir =
                 tempdir().expect("should create temporary directory for artifact storage");
+            let temp_sub_dir = "static-artifacts-storage";
+            let local_storage_path = temp_dir.path().join(temp_sub_dir);
+            println!("local_storage_path: {local_storage_path:?}");
+
+            // Workaround for GitHub Runner & Docker container not running with same gid/uid/permissions:
+            // create & set the temp local storage dir permissions to be world-accessible.
+            fs::create_dir_all(&local_storage_path)
+                .expect("local_storage_path directory should be created");
+            let mut perms = fs::metadata(&local_storage_path)
+                .expect("local dir already exists")
+                .permissions();
+            perms.set_mode(0o777);
+            fs::set_permissions(&local_storage_path, perms)
+                .expect("local dir permission can be set");
+
             let container_volume_path = "/static-artifacts-storage";
             let container_volume_url = "file://".to_owned() + container_volume_path;
 
@@ -80,7 +98,7 @@ fn project_uses_release_build_and_web_process_loads_artifacts() {
                 ContainerConfig::new()
                     .env("RELEASE_ID", unique)
                     .env("STATIC_ARTIFACTS_URL", &container_volume_url)
-                    .bind_mount(local_storage_path.path(), container_volume_path),
+                    .bind_mount(&local_storage_path, container_volume_path),
                 &"release".to_string(),
                 |container| {
                     let log_output = container.logs_now();
@@ -99,7 +117,7 @@ fn project_uses_release_build_and_web_process_loads_artifacts() {
                 ContainerConfig::new()
                     .env("RELEASE_ID", unique)
                     .env("STATIC_ARTIFACTS_URL", &container_volume_url)
-                    .bind_mount(local_storage_path.path(), container_volume_path),
+                    .bind_mount(&local_storage_path, container_volume_path),
                 &"web".to_string(),
                 |container| {
                     let log_output = container.logs_now();
