@@ -71,11 +71,6 @@ fn project_uses_release_build_and_web_process_loads_artifacts() {
                 tempdir().expect("should create temporary directory for artifact storage");
             let container_volume_path = "/static-artifacts-storage";
             let container_volume_url = "file://".to_owned() + container_volume_path;
-            let volume = format!(
-                "{}:{}",
-                local_storage_path.into_path().to_string_lossy(),
-                container_volume_path
-            );
 
             assert_contains!(ctx.pack_stdout, "Procfile");
             assert_contains!(ctx.pack_stdout, "Release Phase");
@@ -85,7 +80,7 @@ fn project_uses_release_build_and_web_process_loads_artifacts() {
                 ContainerConfig::new()
                     .env("RELEASE_ID", unique)
                     .env("STATIC_ARTIFACTS_URL", &container_volume_url)
-                    .volumes([volume.clone()]),
+                    .bind_mount(local_storage_path.path(), container_volume_path),
                 &"release".to_string(),
                 |container| {
                     let log_output = container.logs_now();
@@ -104,7 +99,7 @@ fn project_uses_release_build_and_web_process_loads_artifacts() {
                 ContainerConfig::new()
                     .env("RELEASE_ID", unique)
                     .env("STATIC_ARTIFACTS_URL", &container_volume_url)
-                    .volumes([volume.clone()]),
+                    .bind_mount(local_storage_path.path(), container_volume_path),
                 &"web".to_string(),
                 |container| {
                     let log_output = container.logs_now();
