@@ -9,11 +9,11 @@ description = "Enhances Release Phase with support for multiple, ordered release
 [[buildpack.licenses]]
 type = "MIT"
 
-[[metadata.targets]]
+[[targets]]
 os = "linux"
 arch = "amd64"
 
-[[metadata.targets]]
+[[targets]]
 os = "linux"
 arch = "arm64"
 
