@@ -19,7 +19,7 @@ async fn main() {
         if key.starts_with("STATIC_ARTIFACTS_") || key == "RELEASE_ID" {
             env.insert(key, value);
         }
-    }
+
 
     match save(&env, source_dir).await {
         Ok(()) => {
