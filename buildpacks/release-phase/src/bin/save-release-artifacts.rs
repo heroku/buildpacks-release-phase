@@ -14,7 +14,12 @@ async fn main() {
     }
     let source_dir = Path::new(&args[1]);
 
-    let env = capture_env(Path::new("/etc/heroku"));
+    let mut env = HashMap::new();
+    for (key, value) in env::vars() {
+        if key.starts_with("STATIC_ARTIFACTS_") || key == "RELEASE_ID" {
+            env.insert(key, value);
+        }
+
 
     match save(&env, source_dir).await {
         Ok(()) => {
