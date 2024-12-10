@@ -37,7 +37,7 @@ fn exec_release_sequence(commands_toml_path: &Path) -> Result<(), release_comman
         eprintln!("release-phase executing release-build command: {release_build_config}");
         let mut cmd = Command::new(release_build_config.command);
         if let Some(args) = release_build_config.args {
-            cmd.args(args);
+            cmd.args(args.clone());
         }
         if let Ok(path) = env::var("PATH") {
             cmd.env("PATH", path);
@@ -66,6 +66,9 @@ fn exec_release_sequence(commands_toml_path: &Path) -> Result<(), release_comman
             let mut cmd = Command::new(&config.command);
             if let Some(args) = &config.args {
                 cmd.args(args.clone());
+            }
+            if let Ok(path) = env::var("PATH") {
+                cmd.env("PATH", path);
             }
 
             let status = cmd
