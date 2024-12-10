@@ -53,7 +53,7 @@ impl Buildpack for ReleasePhaseBuildpack {
 
         match setup_release_phase(&context)? {
             Some(release_phase_layer) => {
-                return BuildResultBuilder::new()
+                BuildResultBuilder::new()
                     .launch(
                         LaunchBuilder::new()
                             .process(
