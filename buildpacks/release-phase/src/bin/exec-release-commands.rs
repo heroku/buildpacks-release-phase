@@ -43,8 +43,8 @@ fn exec_release_sequence(commands_toml_path: &Path) -> Result<(), release_comman
             cmd.env("PATH", path);
         }
         let status = cmd
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
+            .stdout(Stdio::inherit())
+            .stderr(Stdio::inherit())
             .status()
             .map_err(release_commands::Error::ReleaseCommandExecError)?;
 
@@ -68,8 +68,8 @@ fn exec_release_sequence(commands_toml_path: &Path) -> Result<(), release_comman
             }
 
             let status = cmd
-                .stdout(Stdio::piped())
-                .stderr(Stdio::piped())
+                .stdout(Stdio::inherit())
+                .stderr(Stdio::inherit())
                 .status()
                 .map_err(release_commands::Error::ReleaseCommandExecError)?;
 
