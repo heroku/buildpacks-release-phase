@@ -48,15 +48,11 @@ fn exec_release_sequence(commands_toml_path: &Path) -> Result<(), release_comman
             .status()
             .map_err(release_commands::Error::ReleaseCommandExecError)?;
 
-        match status.code() {
-            None => (),
-            Some(0) => (),
-            Some(code) => {
-                return Err(release_commands::Error::ReleaseCommandExitedError(format!(
-                    "command exited with status code {}",
-                    code
-                )))
-            }
+        if status.code() != Some(0) {
+            return Err(release_commands::Error::ReleaseCommandExitedError(format!(
+                "command exited with status code {}",
+                status.code().expect("status code to exist")
+            )));
         }
     };
 
@@ -77,15 +73,11 @@ fn exec_release_sequence(commands_toml_path: &Path) -> Result<(), release_comman
                 .status()
                 .map_err(release_commands::Error::ReleaseCommandExecError)?;
 
-            match status.code() {
-                None => (),
-                Some(0) => (),
-                Some(code) => {
-                    return Err(release_commands::Error::ReleaseCommandExitedError(format!(
-                        "command exited with status code {}",
-                        code
-                    )))
-                }
+            if status.code() != Some(0) {
+                return Err(release_commands::Error::ReleaseCommandExitedError(format!(
+                    "command exited with status code {}",
+                    status.code().expect("status code to exist")
+                )));
             }
         }
     };
