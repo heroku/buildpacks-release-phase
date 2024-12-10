@@ -56,7 +56,7 @@ fn project_uses_release_build() {
                 assert_contains!(log_output.stderr, "release-phase plan");
                 assert_contains!(log_output.stdout, "Build in Release Phase Buildpack!");
                 assert_contains!(
-                    log_output.stdout,
+                    log_output.stderr,
                     "save-release-artifacts writing archive: release-xyz.tgz"
                 );
                 assert_contains!(log_output.stderr, "release-phase complete.");
@@ -108,7 +108,7 @@ fn project_uses_release_build_and_web_process_loads_artifacts() {
                     assert_contains!(log_output.stderr, "release-phase plan");
                     assert_contains!(log_output.stdout, "Build in Release Phase Buildpack!");
                     assert_contains!(
-                        log_output.stdout,
+                        log_output.stderr,
                         format!("save-release-artifacts writing archive: release-{unique}.tgz")
                             .as_str()
                     );
