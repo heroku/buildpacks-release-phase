@@ -19,7 +19,10 @@ fn project_uses_release() {
         assert_contains!(ctx.pack_stdout, "Successfully built image");
         start_container_entrypoint(
             &ctx,
-            &mut ContainerConfig::new(),
+            ContainerConfig::new().env(
+                "TEST_ENV_INHERITED",
+                "Container env is available to release command",
+            ),
             &"release".to_string(),
             |container| {
                 let log_output = container.logs_now();
@@ -27,7 +30,7 @@ fn project_uses_release() {
                 assert_contains!(log_output.stdout, "Hello from Release Phase Buildpack!");
                 assert_contains!(
                     log_output.stdout,
-                    "Hello again from Release Phase Buildpack!"
+                    "Container env is available to release command"
                 );
                 assert_contains!(log_output.stderr, "release-phase complete.");
             },
