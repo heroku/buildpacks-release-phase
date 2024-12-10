@@ -52,27 +52,25 @@ impl Buildpack for ReleasePhaseBuildpack {
         log_header(BUILDPACK_NAME);
 
         match setup_release_phase(&context)? {
-            Some(release_phase_layer) => {
-                return BuildResultBuilder::new()
-                    .launch(
-                        LaunchBuilder::new()
-                            .process(
-                                ProcessBuilder::new(
-                                    process_type!("release"),
-                                    [
-                                        "exec-release-commands",
-                                        &release_phase_layer
-                                            .path()
-                                            .join("release-commands.toml")
-                                            .to_string_lossy(),
-                                    ],
-                                )
-                                .build(),
+            Some(release_phase_layer) => BuildResultBuilder::new()
+                .launch(
+                    LaunchBuilder::new()
+                        .process(
+                            ProcessBuilder::new(
+                                process_type!("release"),
+                                [
+                                    "exec-release-commands",
+                                    &release_phase_layer
+                                        .path()
+                                        .join("release-commands.toml")
+                                        .to_string_lossy(),
+                                ],
                             )
                             .build(),
-                    )
-                    .build()
-            }
+                        )
+                        .build(),
+                )
+                .build(),
             None => BuildResultBuilder::new().build(),
         }
     }

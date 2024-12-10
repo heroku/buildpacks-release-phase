@@ -1,7 +1,11 @@
 // Required due to: https://github.com/rust-lang/rust/issues/95513
 #![allow(unused_crate_dependencies)]
 
-use std::{env, path::Path, process::Command};
+use std::{
+    env,
+    path::Path,
+    process::{Command, Stdio},
+};
 
 use release_commands::read_commands_config;
 
@@ -32,54 +36,48 @@ fn exec_release_sequence(commands_toml_path: &Path) -> Result<(), release_comman
     if let Some(release_build_config) = config.release_build {
         eprintln!("release-phase executing release-build command: {release_build_config}");
         let mut cmd = Command::new(release_build_config.command);
-        release_build_config.args.clone().map(|v| cmd.args(v));
-        let output = cmd
-            .output()
-            .map_err(release_commands::Error::ReleaseCommandExecError)?;
-        let log = tidy_logs(
-            String::from_utf8_lossy(&output.stderr).as_ref(),
-            String::from_utf8_lossy(&output.stdout).as_ref(),
-        );
-        if output.status.code() != Some(0) {
-            return Err(release_commands::Error::ReleaseCommandExitedError(log));
+        if let Some(args) = release_build_config.args {
+            cmd.args(args.clone());
         }
-        print!("{log}");
+
+        let status = cmd
+            .stdout(Stdio::inherit())
+            .stderr(Stdio::inherit())
+            .status()
+            .map_err(release_commands::Error::ReleaseCommandExecError)?;
+
+        if status.code() != Some(0) {
+            return Err(release_commands::Error::ReleaseCommandExitedError(format!(
+                "command exited with status code {}",
+                status.code().expect("status code to exist")
+            )));
+        }
     };
 
     if let Some(release_config) = config.release {
         for config in &release_config {
             eprintln!("release-phase executing release command: {config}");
             let mut cmd = Command::new(&config.command);
-            config.args.clone().map(|v| cmd.args(v));
-            let output = cmd
-                .output()
-                .map_err(release_commands::Error::ReleaseCommandExecError)?;
-            let log = tidy_logs(
-                String::from_utf8_lossy(&output.stderr).as_ref(),
-                String::from_utf8_lossy(&output.stdout).as_ref(),
-            );
-            if output.status.code() != Some(0) {
-                return Err(release_commands::Error::ReleaseCommandExitedError(log));
+            if let Some(args) = &config.args {
+                cmd.args(args.clone());
             }
-            print!("{log}");
+
+            let status = cmd
+                .stdout(Stdio::inherit())
+                .stderr(Stdio::inherit())
+                .status()
+                .map_err(release_commands::Error::ReleaseCommandExecError)?;
+
+            if status.code() != Some(0) {
+                return Err(release_commands::Error::ReleaseCommandExitedError(format!(
+                    "command exited with status code {}",
+                    status.code().expect("status code to exist")
+                )));
+            }
         }
     };
 
     Ok(())
-}
-
-fn tidy_logs(stderr: &str, stdout: &str) -> String {
-    let mut output = String::new();
-    if !stderr.is_empty() {
-        output = output + "stderr:\n" + stderr;
-    }
-    if !stderr.is_empty() && !stdout.is_empty() {
-        output += "\n";
-    }
-    if !stdout.is_empty() {
-        output = output + "stdout:\n" + stdout;
-    }
-    output
 }
 
 #[cfg(test)]

@@ -1,3 +1,17 @@
+# To validate log streaming manually:
+#
+# cargo libcnb package --release --target aarch64-unknown-linux-musl
+#
+# pack build cnb-release-phase-test \
+#   --buildpack packaged/aarch64-unknown-linux-musl/release/heroku_release-phase \
+#   --builder heroku/builder:24 \
+#   --path buildpacks/release-phase/tests/fixtures/project_uses_release
+#
+# docker run --entrypoint release cnb-release-phase-test
+#
+# …then, watch to see that after "Hello from Release Phase Buildpack!", 
+# each numeral 1..5 is output in a 5-second sequence (not all simultaneously)
+
 [_]
 schema-version = "0.2"
 
@@ -6,8 +20,8 @@ uri = "heroku/release-phase"
 
 [[com.heroku.phase.release]]
 command = "bash"
-args = ["-c", "echo 'Hello from Release Phase Buildpack!'"]
+args = ["-c", "echo 'Hello from Release Phase Buildpack!' && sleep 1 && echo 1 && sleep 1 && echo 2 && sleep 1 && echo 3 && sleep 1 && echo 4 && sleep 1 && echo 5"]
 
 [[com.heroku.phase.release]]
 command = "bash"
-args = ["-c", "echo 'Hello again from Release Phase Buildpack!'"]
+args = ["-c", "echo $TEST_ENV_INHERITED"]
