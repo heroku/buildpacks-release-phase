@@ -1,9 +1,9 @@
 // Required due to: https://github.com/rust-lang/rust/issues/95513
 #![allow(unused_crate_dependencies)]
 
-use std::{collections::HashMap, env, path::Path};
+use std::{env, path::Path};
 
-use release_artifacts::save;
+use release_artifacts::{capture_env, save};
 
 #[tokio::main]
 async fn main() {
@@ -14,12 +14,7 @@ async fn main() {
     }
     let source_dir = Path::new(&args[1]);
 
-    let mut env = HashMap::new();
-    for (key, value) in env::vars() {
-        if key.starts_with("STATIC_ARTIFACTS_") || key == "RELEASE_ID" {
-            env.insert(key, value);
-        }
-    }
+    let env = capture_env();
 
     match save(&env, source_dir).await {
         Ok(()) => {

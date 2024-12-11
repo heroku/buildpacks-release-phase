@@ -44,9 +44,9 @@ This command must output release artifacts into `/workspace/static-artifacts/`. 
 
 ## Configuration: runtime environment vars
 
-### `RELEASE_ID`
+### `/etc/heroku/release_id` or `RELEASE_ID`
 
-**Required.** Should be provided by the runtime environment, such as a UUID or version number.
+**Required.** Should be provided by the runtime environment, such as a UUID or version number, either set in the file `/etc/heroku/release_id`, or as the environment variable `RELEASE_ID`.
 
 Artifacts are stored at the `STATIC_ARTIFACTS_URL` with the name `release-<RELEASE_ID>.tgz`.
 
