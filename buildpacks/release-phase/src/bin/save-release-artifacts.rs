@@ -14,7 +14,7 @@ async fn main() {
     }
     let source_dir = Path::new(&args[1]);
 
-    let env = capture_env();
+    let env = capture_env(Path::new("/etc/heroku"));
 
     match save(&env, source_dir).await {
         Ok(()) => {

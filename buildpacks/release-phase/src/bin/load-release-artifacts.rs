@@ -13,7 +13,7 @@ use release_artifacts::{capture_env, load};
 async fn main() {
     let source_dir = Path::new("static-artifacts");
 
-    let env = capture_env();
+    let env = capture_env(Path::new("/etc/heroku"));
 
     match load(&env, source_dir).await {
         Ok(loaded_key) => {
