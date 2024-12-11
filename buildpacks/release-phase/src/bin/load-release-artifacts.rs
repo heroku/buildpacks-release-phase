@@ -1,24 +1,19 @@
 // Required due to: https://github.com/rust-lang/rust/issues/95513
 #![allow(unused_crate_dependencies)]
 
-use std::{collections::HashMap, env, path::Path};
+use std::{collections::HashMap, path::Path};
 
 use libcnb::data::exec_d::ExecDProgramOutputKey;
 use libcnb::data::exec_d_program_output_key;
 use libcnb::exec_d::write_exec_d_program_output;
 
-use release_artifacts::load;
+use release_artifacts::{capture_env, load};
 
 #[tokio::main]
 async fn main() {
     let source_dir = Path::new("static-artifacts");
 
-    let mut env = HashMap::new();
-    for (key, value) in env::vars() {
-        if key.starts_with("STATIC_ARTIFACTS_") || key == "RELEASE_ID" {
-            env.insert(key, value);
-        }
-    }
+    let env = capture_env(Path::new("/etc/heroku"));
 
     match load(&env, source_dir).await {
         Ok(loaded_key) => {

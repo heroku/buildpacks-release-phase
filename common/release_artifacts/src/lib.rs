@@ -6,9 +6,10 @@ use flate2::{read::GzDecoder, Compression, GzBuilder};
 use regex::Regex;
 use std::{
     collections::HashMap,
+    env,
     fs::{self, File},
     hash::BuildHasher,
-    io::Write,
+    io::{Read, Write},
     path::{Path, PathBuf},
 };
 use tar::Archive;
@@ -19,6 +20,28 @@ use url::Url;
 
 use tokio as _;
 use uuid::{self as _, Uuid};
+
+#[must_use]
+pub fn capture_env(dyno_metadata_dir: &Path) -> HashMap<String, String> {
+    let mut env = HashMap::new();
+    for (key, value) in env::vars() {
+        if key.starts_with("STATIC_ARTIFACTS_") || key == "RELEASE_ID" {
+            env.insert(key, value);
+        }
+    }
+    // Override RELEASE_ID with value from the dyno filesystem, when present.
+    File::open(dyno_metadata_dir.join("release_id"))
+        .map_or(None, |mut file| {
+            let mut buffer = String::new();
+            if file.read_to_string(&mut buffer).is_ok() {
+                buffer = buffer.trim().to_string();
+                return Some(buffer);
+            }
+            None
+        })
+        .map(|dyno_release_id| env.insert("RELEASE_ID".to_owned(), dyno_release_id));
+    env
+}
 
 pub async fn save<S: BuildHasher>(
     env: &HashMap<String, String, S>,
@@ -440,7 +463,7 @@ mod tests {
         collections::HashMap,
         env,
         fs::{self, File},
-        io::Read,
+        io::{Read, Write},
         path::Path,
     };
 
@@ -453,12 +476,45 @@ mod tests {
     use aws_smithy_types::body::SdkBody;
 
     use crate::{
-        create_archive, detect_storage_scheme, download_specific_or_latest_with_client,
-        download_with_client, errors::ReleaseArtifactsError, extract_archive,
-        find_latest_with_client, generate_archive_name, generate_file_storage_location,
-        generate_s3_client, generate_s3_storage_location, guard_file, guard_s3, load,
-        make_s3_test_credentials, parse_s3_url, save, upload_with_client,
+        capture_env, create_archive, detect_storage_scheme,
+        download_specific_or_latest_with_client, download_with_client,
+        errors::ReleaseArtifactsError, extract_archive, find_latest_with_client,
+        generate_archive_name, generate_file_storage_location, generate_s3_client,
+        generate_s3_storage_location, guard_file, guard_s3, load, make_s3_test_credentials,
+        parse_s3_url, save, upload_with_client,
     };
+
+    #[test]
+    fn capture_env_succeeds() {
+        env::set_var("RELEASE_ID", "test-release-id");
+        let result = capture_env(Path::new("does-not-exist"));
+        env::remove_var("RELEASE_ID");
+        assert_eq!(
+            result.get("RELEASE_ID"),
+            Some(&"test-release-id".to_string())
+        );
+    }
+
+    #[test]
+    fn capture_env_with_metadata_file_succeeds() {
+        let unique = Uuid::new_v4();
+        let dyno_metadata_dir = format!("dyno-metadata-for-test-{unique}");
+        let dyno_metadata_path = Path::new(&dyno_metadata_dir);
+        fs::create_dir_all(dyno_metadata_path).expect("dyno metadata dir should be created");
+        let release_id_path = dyno_metadata_path.join("release_id");
+        File::create(&release_id_path)
+            .and_then(|mut file| file.write_all(b"test-release-id-from-file"))
+            .expect("dyno metadata file shoud be written");
+
+        env::set_var("RELEASE_ID", "test-release-id-from-env");
+        let result = capture_env(dyno_metadata_path);
+        env::remove_var("RELEASE_ID");
+        assert_eq!(
+            result.get("RELEASE_ID"),
+            Some(&"test-release-id-from-file".to_string())
+        );
+        fs::remove_dir_all(dyno_metadata_path).unwrap_or_default();
+    }
 
     #[tokio::test]
     async fn save_file_url_succeeds() {
