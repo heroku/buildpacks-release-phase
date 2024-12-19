@@ -1,6 +1,7 @@
 // Required due to: https://github.com/rust-lang/rust/issues/95513
 #![allow(unused_crate_dependencies)]
 
+use core::time;
 use std::{
     env,
     path::Path,
@@ -20,10 +21,14 @@ fn main() {
     match exec_release_sequence(commands_toml_path) {
         Ok(()) => {
             eprintln!("release-phase complete.");
+            // Work-around to allow logs to flush before exit.
+            std::thread::sleep(time::Duration::from_secs(1));
             std::process::exit(0);
         }
         Err(error) => {
             eprintln!("release-phase failed: {error}");
+            // Work-around to allow logs to flush before exit.
+            std::thread::sleep(time::Duration::from_secs(1));
             std::process::exit(1);
         }
     }
