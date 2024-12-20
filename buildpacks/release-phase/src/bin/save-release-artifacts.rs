@@ -14,13 +14,6 @@ async fn main() {
     }
     let source_dir = Path::new(&args[1]);
 
-    let mut env = HashMap::new();
-    for (key, value) in env::vars() {
-        if key.starts_with("STATIC_ARTIFACTS_") || key == "RELEASE_ID" {
-            env.insert(key, value);
-        }
-
-
     match save(&env, source_dir).await {
         Ok(()) => {
             eprintln!("save-release-artifacts complete.");
