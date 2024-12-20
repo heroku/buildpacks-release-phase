@@ -112,6 +112,16 @@ pub async fn gc<S: BuildHasher>(
                 .map_err(ReleaseArtifactsError::StorageURLInvalid)?;
 
             let entries = sorted_dir_entries(parsed_url.path())?;
+            let results = entries[2..].iter().map(|filename| {
+                fs::remove_file(filename).map_err(|e| {
+                    ReleaseArtifactsError::ArchiveError(
+                        e,
+                        format!(
+                            "Could not remove file {filename} during artifact garbage collection."
+                        ),
+                    )
+                })
+            });
             Ok(())
         }
         Ok(scheme) if scheme == *"s3" => {
@@ -132,29 +142,27 @@ fn sorted_dir_entries(path: &str) -> Result<Vec<String>, ReleaseArtifactsError> 
     })?;
 
     let mut entries_with_mod_time: Vec<(String, SystemTime)> = vec![];
-    for entry in entries {
+    for entry in entries.flatten() {
         // TODO cleanup
-        if let Ok(dir_entry) = entry {
-            if let Ok(metadata) = dir_entry.metadata() {
-                if let Ok(filename) = dir_entry.file_name().into_string() {
-                    let ext = Path::new(filename.as_str()).extension();
-                    let has_correct_ext = ext.is_some_and(|e| e == "tgz");
-                    if metadata.is_file() && has_correct_ext {
-                        if let Ok(modified) = metadata.modified() {
-                            entries_with_mod_time
-                                .append(vec![(filename.clone(), modified)].as_mut())
-                        };
-                    }
+        if let Ok(metadata) = entry.metadata() {
+            if let Ok(filename) = entry.file_name().into_string() {
+                let ext = Path::new(filename.as_str()).extension();
+                let has_correct_ext = ext.is_some_and(|e| e == "tgz");
+                if metadata.is_file() && has_correct_ext {
+                    if let Ok(modified) = metadata.modified() {
+                        entries_with_mod_time.append(vec![(filename.clone(), modified)].as_mut());
+                    };
                 }
             }
         }
     }
 
+    entries_with_mod_time.sort_by(|a, b| b.1.cmp(&a.1));
+
     let result = entries_with_mod_time
         .iter()
         .map(|tup| tup.0.clone())
         .collect();
-    // TODO sort acc
     Ok(result)
 }
 
@@ -540,7 +548,7 @@ mod tests {
         errors::ReleaseArtifactsError, extract_archive, find_latest_with_client,
         generate_archive_name, generate_file_storage_location, generate_s3_client,
         generate_s3_storage_location, guard_file, guard_s3, load, make_s3_test_credentials,
-        parse_s3_url, save, upload_with_client,
+        parse_s3_url, save, sorted_dir_entries, upload_with_client,
     };
 
     #[test]
@@ -1100,6 +1108,17 @@ mod tests {
         assert!(fs::metadata(output_dir.join("images")).is_ok());
         assert!(fs::metadata(output_dir.join("images/desktop-heroku-pride.jpg")).is_ok());
         fs::remove_dir_all(output_dir).expect("temporary directory should be deleted");
+    }
+
+    #[test]
+    fn sorted_dir_entries_succeeds() {
+        let result = sorted_dir_entries("test/fixtures/archives-in-storage");
+        eprintln!("{result:?}");
+        assert!(result.is_ok());
+        let result = result.unwrap();
+        assert_eq!(result[0], String::from("release-angel.tgz"));
+        assert_eq!(result[1], String::from("release-funzzies.tgz"));
+        assert_eq!(result[2], String::from("release-bork.tgz"));
     }
 
     #[tokio::test]
