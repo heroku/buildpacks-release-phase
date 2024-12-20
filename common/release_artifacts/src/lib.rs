@@ -10,9 +10,7 @@ use std::{
     fs::{self, read_dir, DirEntry, File, FileType},
     hash::BuildHasher,
     io::{Read, Write},
-    o,
     path::{Path, PathBuf},
-    ptr::metadata,
     time::SystemTime,
 };
 use tar::Archive;
@@ -102,30 +100,30 @@ pub async fn load<S: BuildHasher>(
     }
 }
 
+#[allow(clippy::unused_async)]
 pub async fn gc<S: BuildHasher>(
     env: &HashMap<String, String, S>,
-) -> Result<String, ReleaseArtifactsError> {
+) -> Result<(), ReleaseArtifactsError> {
     match detect_storage_scheme(env) {
         Ok(scheme) if scheme == *"file" => {
             guard_file(env)?;
 
-            let path = Url::parse(&env["STATIC_ARTIFACTS_URL"])
-                .map_err(ReleaseArtifactsError::StorageURLInvalid)?
-                .path();
+            let parsed_url = Url::parse(&env["STATIC_ARTIFACTS_URL"])
+                .map_err(ReleaseArtifactsError::StorageURLInvalid)?;
 
-            let entries = sorted_dir_entries(path);
+            let entries = sorted_dir_entries(parsed_url.path())?;
+            Ok(())
         }
-
         Ok(scheme) if scheme == *"s3" => {
             guard_s3(env)?;
-            todo!();
+            Ok(())
         }
         Ok(scheme) => Err(ReleaseArtifactsError::StorageURLUnsupportedScheme(scheme)),
         Err(e) => Err(e),
     }
 }
 
-fn sorted_dir_entries(path: &str) -> Result<Vec<_>, ReleaseArtifactsError> {
+fn sorted_dir_entries(path: &str) -> Result<Vec<String>, ReleaseArtifactsError> {
     let entries = fs::read_dir(path).map_err(|e| {
         ReleaseArtifactsError::ArchiveError(
             e,
@@ -133,26 +131,31 @@ fn sorted_dir_entries(path: &str) -> Result<Vec<_>, ReleaseArtifactsError> {
         )
     })?;
 
-    let mut acc: Vec<(DirEntry, SystemTime)> = vec![];
+    let mut entries_with_mod_time: Vec<(String, SystemTime)> = vec![];
     for entry in entries {
         // TODO cleanup
         if let Ok(dir_entry) = entry {
             if let Ok(metadata) = dir_entry.metadata() {
-                let ext = Path::new(&dir_entry.file_name()).extension();
-                if metadata.is_file() && ext.is_some_and(|e| {
-                    e == "tgz"
-                }
-)  {
-                    if let Ok(modified) = metadata.modified() {
-                        acc.append(vec![(dir_entry, modified)].as_mut())
-                    };
-                    
+                if let Ok(filename) = dir_entry.file_name().into_string() {
+                    let ext = Path::new(filename.as_str()).extension();
+                    let has_correct_ext = ext.is_some_and(|e| e == "tgz");
+                    if metadata.is_file() && has_correct_ext {
+                        if let Ok(modified) = metadata.modified() {
+                            entries_with_mod_time
+                                .append(vec![(filename.clone(), modified)].as_mut())
+                        };
+                    }
                 }
             }
         }
     }
+
+    let result = entries_with_mod_time
+        .iter()
+        .map(|tup| tup.0.clone())
+        .collect();
     // TODO sort acc
-    Ok(acc)
+    Ok(result)
 }
 
 pub async fn upload_with_client(

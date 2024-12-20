@@ -13,7 +13,7 @@ async fn main() {
         std::process::exit(1);
     }
     let source_dir = Path::new(&args[1]);
-
+    let env = capture_env(Path::new("/etc/heroku"));
     match save(&env, source_dir).await {
         Ok(()) => {
             eprintln!("save-release-artifacts complete.");
