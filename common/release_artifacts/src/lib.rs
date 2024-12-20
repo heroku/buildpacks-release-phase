@@ -7,10 +7,13 @@ use regex::Regex;
 use std::{
     collections::HashMap,
     env,
-    fs::{self, File},
+    fs::{self, read_dir, DirEntry, File, FileType},
     hash::BuildHasher,
     io::{Read, Write},
+    o,
     path::{Path, PathBuf},
+    ptr::metadata,
+    time::SystemTime,
 };
 use tar::Archive;
 
@@ -97,6 +100,59 @@ pub async fn load<S: BuildHasher>(
         Ok(scheme) => Err(ReleaseArtifactsError::StorageURLUnsupportedScheme(scheme)),
         Err(e) => Err(e),
     }
+}
+
+pub async fn gc<S: BuildHasher>(
+    env: &HashMap<String, String, S>,
+) -> Result<String, ReleaseArtifactsError> {
+    match detect_storage_scheme(env) {
+        Ok(scheme) if scheme == *"file" => {
+            guard_file(env)?;
+
+            let path = Url::parse(&env["STATIC_ARTIFACTS_URL"])
+                .map_err(ReleaseArtifactsError::StorageURLInvalid)?
+                .path();
+
+            let entries = sorted_dir_entries(path);
+        }
+
+        Ok(scheme) if scheme == *"s3" => {
+            guard_s3(env)?;
+            todo!();
+        }
+        Ok(scheme) => Err(ReleaseArtifactsError::StorageURLUnsupportedScheme(scheme)),
+        Err(e) => Err(e),
+    }
+}
+
+fn sorted_dir_entries(path: &str) -> Result<Vec<_>, ReleaseArtifactsError> {
+    let entries = fs::read_dir(path).map_err(|e| {
+        ReleaseArtifactsError::ArchiveError(
+            e,
+            format!("Could not read directory {path} when reading directory entries."),
+        )
+    })?;
+
+    let mut acc: Vec<(DirEntry, SystemTime)> = vec![];
+    for entry in entries {
+        // TODO cleanup
+        if let Ok(dir_entry) = entry {
+            if let Ok(metadata) = dir_entry.metadata() {
+                let ext = Path::new(&dir_entry.file_name()).extension();
+                if metadata.is_file() && ext.is_some_and(|e| {
+                    e == "tgz"
+                }
+)  {
+                    if let Ok(modified) = metadata.modified() {
+                        acc.append(vec![(dir_entry, modified)].as_mut())
+                    };
+                    
+                }
+            }
+        }
+    }
+    // TODO sort acc
+    Ok(acc)
 }
 
 pub async fn upload_with_client(
@@ -244,14 +300,6 @@ pub async fn find_latest_with_client(
             .map(std::string::ToString::to_string)
     });
     Ok(latest_key)
-}
-
-
-pub async fn gc<S: BuildHasher>(
-    env: &HashMap<String, String, S>,
-    dir: &Path,
-) -> Result<String, ReleaseArtifactsError> {
-    Ok("cool".to_string())
 }
 
 fn detect_storage_scheme<S: BuildHasher>(
