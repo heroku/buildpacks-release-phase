@@ -47,9 +47,6 @@ pub async fn save<S: BuildHasher>(
     env: &HashMap<String, String, S>,
     dir: &Path,
 ) -> Result<(), ReleaseArtifactsError> {
-    // TODO: check if the artifact dir is empty
-    // & check if it contains >1Gb data, if so
-    // exit with a failure and a clear error msg
     match detect_storage_scheme(env) {
         Ok(scheme) if scheme == *"file" => {
             guard_file(env)?;
