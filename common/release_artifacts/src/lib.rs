@@ -112,7 +112,7 @@ pub async fn gc<S: BuildHasher>(
                 .map_err(ReleaseArtifactsError::StorageURLInvalid)?;
 
             let entries = sorted_dir_entries(parsed_url.path())?;
-            let results = entries[2..].iter().map(|filename| {
+            for filename in entries[2..].iter() {
                 fs::remove_file(filename).map_err(|e| {
                     ReleaseArtifactsError::ArchiveError(
                         e,
@@ -120,10 +120,11 @@ pub async fn gc<S: BuildHasher>(
                             "Could not remove file {filename} during artifact garbage collection."
                         ),
                     )
-                })
-            });
+                })?
+            }
             Ok(())
         }
+
         Ok(scheme) if scheme == *"s3" => {
             guard_s3(env)?;
             Ok(())
