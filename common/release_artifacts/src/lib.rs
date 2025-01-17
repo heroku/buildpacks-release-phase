@@ -133,7 +133,8 @@ fn gc_file<S: BuildHasher>(env: &HashMap<String, String, S>) -> Result<(), Relea
     let entries = sorted_dir_entries(parsed_url.path())?;
     if entries.len() >= 2 {
         for filename in entries[2..].iter() {
-            fs::remove_file(filename).map_err(|e| {
+            let filepath = Path::new(parsed_url.path()).join(filename);
+            fs::remove_file(filepath).map_err(|e| {
                 ReleaseArtifactsError::ArchiveError(
                     e,
                     format!("Could not remove file {filename} during artifact garbage collection."),
@@ -543,6 +544,7 @@ mod tests {
         fs::{self, File},
         io::{Read, Write},
         path::Path,
+        time::{Duration, SystemTime},
     };
 
     use aws_config::BehaviorVersion;
@@ -1682,5 +1684,42 @@ mod tests {
 
         eprintln!("result is: {result:?}");
         assert!(result.is_ok())
+    }
+
+    #[tokio::test]
+    async fn garbage_collect_should_remove_files_older_than_the_first_two() {
+        let mut test_env = HashMap::new();
+
+        // TODO: file test_env helper
+        let unique = Uuid::new_v4();
+        let output_archive_dir = format!("test-file-storage-location-{unique}");
+        let abs_root = env::current_dir().expect("should have a current working directory");
+        let output_archive_dir_path = Path::new(&abs_root).join(output_archive_dir.as_str());
+        fs::remove_dir_all(&output_archive_dir_path).unwrap_or_default();
+        fs::create_dir_all(&output_archive_dir_path).unwrap_or_default();
+
+        File::create_new(output_archive_dir_path.join("test1.tgz"))
+            .unwrap()
+            .set_modified(SystemTime::now() - Duration::new(120, 0)).unwrap();
+        File::create_new(output_archive_dir_path.join("test2.tgz"))
+            .unwrap()
+            .set_modified(SystemTime::now() - Duration::new(60, 0)).unwrap();
+        File::create_new(output_archive_dir_path.join("test3.tgz"))
+            .unwrap()
+            .set_modified(SystemTime::now()).unwrap();
+
+        let mut entries = fs::read_dir(output_archive_dir_path.clone()).unwrap();
+        assert!(entries.count() == 3);
+
+        test_env.insert(
+            "STATIC_ARTIFACTS_URL".to_string(),
+            format!("file://{}", output_archive_dir_path.to_string_lossy()),
+        );
+
+        let result = gc(&test_env).await;
+        eprintln!("{result:?}");
+        assert!(result.is_ok());
+        entries = fs::read_dir(output_archive_dir_path).unwrap();
+        assert!(entries.count() == 2);
     }
 }
