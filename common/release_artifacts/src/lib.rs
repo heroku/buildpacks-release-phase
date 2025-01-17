@@ -76,9 +76,13 @@ pub async fn load<S: BuildHasher>(
     env: &HashMap<String, String, S>,
     dir: &Path,
 ) -> Result<String, ReleaseArtifactsError> {
+    if !env.contains_key("STATIC_ARTIFACTS_URL") {
+        return Err(ReleaseArtifactsError::ConfigMissing(
+            "STATIC_ARTIFACTS_URL is required".to_string(),
+        ));
+    }
     match detect_storage_scheme(env) {
         Ok(scheme) if scheme == *"file" => {
-            guard_file(env)?;
             let archive_name = generate_archive_name::<S>(env);
             eprintln!("load-release-artifacts reading archive: {archive_name}");
             // This file scheme does not currently find latest if the specific release ID is missing.
@@ -104,34 +108,40 @@ pub async fn load<S: BuildHasher>(
 pub async fn gc<S: BuildHasher>(
     env: &HashMap<String, String, S>,
 ) -> Result<(), ReleaseArtifactsError> {
+    if !env.contains_key("STATIC_ARTIFACTS_URL") {
+        return Err(ReleaseArtifactsError::ConfigMissing(
+            "STATIC_ARTIFACTS_URL is required".to_string(),
+        ));
+    }
     match detect_storage_scheme(env) {
-        Ok(scheme) if scheme == *"file" => {
-            guard_file(env)?;
-
-            let parsed_url = Url::parse(&env["STATIC_ARTIFACTS_URL"])
-                .map_err(ReleaseArtifactsError::StorageURLInvalid)?;
-
-            let entries = sorted_dir_entries(parsed_url.path())?;
-            for filename in entries[2..].iter() {
-                fs::remove_file(filename).map_err(|e| {
-                    ReleaseArtifactsError::ArchiveError(
-                        e,
-                        format!(
-                            "Could not remove file {filename} during artifact garbage collection."
-                        ),
-                    )
-                })?
-            }
-            Ok(())
-        }
-
-        Ok(scheme) if scheme == *"s3" => {
-            guard_s3(env)?;
-            Ok(())
-        }
+        Ok(scheme) if scheme == *"file" => gc_file(env),
+        Ok(scheme) if scheme == *"s3" => gc_s3(env),
         Ok(scheme) => Err(ReleaseArtifactsError::StorageURLUnsupportedScheme(scheme)),
         Err(e) => Err(e),
     }
+}
+
+fn gc_s3<S: BuildHasher>(env: &HashMap<String, String, S>) -> Result<(), ReleaseArtifactsError> {
+    guard_s3(env)?;
+    Ok(())
+}
+
+fn gc_file<S: BuildHasher>(env: &HashMap<String, String, S>) -> Result<(), ReleaseArtifactsError> {
+    let parsed_url = Url::parse(&env["STATIC_ARTIFACTS_URL"])
+        .map_err(ReleaseArtifactsError::StorageURLInvalid)?;
+
+    let entries = sorted_dir_entries(parsed_url.path())?;
+    if entries.len() >= 2 {
+        for filename in entries[2..].iter() {
+            fs::remove_file(filename).map_err(|e| {
+                ReleaseArtifactsError::ArchiveError(
+                    e,
+                    format!("Could not remove file {filename} during artifact garbage collection."),
+                )
+            })?
+        }
+    }
+    Ok(())
 }
 
 fn sorted_dir_entries(path: &str) -> Result<Vec<String>, ReleaseArtifactsError> {
@@ -546,7 +556,7 @@ mod tests {
     use crate::{
         capture_env, create_archive, detect_storage_scheme,
         download_specific_or_latest_with_client, download_with_client,
-        errors::ReleaseArtifactsError, extract_archive, find_latest_with_client,
+        errors::ReleaseArtifactsError, extract_archive, find_latest_with_client, gc,
         generate_archive_name, generate_file_storage_location, generate_s3_client,
         generate_s3_storage_location, guard_file, guard_s3, load, make_s3_test_credentials,
         parse_s3_url, save, sorted_dir_entries, upload_with_client,
@@ -1649,5 +1659,28 @@ mod tests {
         extract_archive(Path::new("non-existent-path"), output_path)
             .expect_err("should fail for missing source file");
         fs::remove_dir_all(output_path).unwrap_or_default();
+    }
+
+    #[tokio::test]
+    async fn garbage_collect_should_succeed_with_empty_dir() {
+        let mut test_env = HashMap::new();
+
+        // TODO: file test_env helper
+        let unique = Uuid::new_v4();
+        let output_archive_dir = format!("test-file-storage-location-{unique}");
+        let abs_root = env::current_dir().expect("should have a current working directory");
+        let output_archive_dir_path = Path::new(&abs_root).join(output_archive_dir.as_str());
+        fs::remove_dir_all(&output_archive_dir_path).unwrap_or_default();
+        fs::create_dir_all(&output_archive_dir_path).unwrap_or_default();
+
+        test_env.insert(
+            "STATIC_ARTIFACTS_URL".to_string(),
+            format!("file://{}", output_archive_dir_path.to_string_lossy()),
+        );
+
+        let result = gc(&test_env).await;
+
+        eprintln!("result is: {result:?}");
+        assert!(result.is_ok())
     }
 }
