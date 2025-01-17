@@ -1698,17 +1698,19 @@ mod tests {
         fs::remove_dir_all(&output_archive_dir_path).unwrap_or_default();
         fs::create_dir_all(&output_archive_dir_path).unwrap_or_default();
 
-        File::create_new(output_archive_dir_path.join("test1.tgz"))
-            .unwrap()
-            .set_modified(SystemTime::now() - Duration::new(120, 0)).unwrap();
-        File::create_new(output_archive_dir_path.join("test2.tgz"))
-            .unwrap()
-            .set_modified(SystemTime::now() - Duration::new(60, 0)).unwrap();
-        File::create_new(output_archive_dir_path.join("test3.tgz"))
-            .unwrap()
-            .set_modified(SystemTime::now()).unwrap();
+        let test_path_1 = output_archive_dir_path.join("test1.tgz");
+        let test_file_1 = File::create_new(test_path_1.clone()).unwrap();
+        test_file_1.set_modified(SystemTime::now() - Duration::new(120, 0)).unwrap();
 
-        let mut entries = fs::read_dir(output_archive_dir_path.clone()).unwrap();
+        let test_path_2 = output_archive_dir_path.join("test2.tgz");
+        let test_file_2 = File::create_new(test_path_2.clone()).unwrap();
+        test_file_2.set_modified(SystemTime::now() - Duration::new(60, 0)).unwrap();
+
+        let test_path_3 = output_archive_dir_path.join("test3.tgz");
+        let test_file_3 = File::create_new(test_path_3.clone()).unwrap();
+        test_file_3.set_modified(SystemTime::now()).unwrap();
+
+        let entries = fs::read_dir(output_archive_dir_path.clone()).unwrap();
         assert!(entries.count() == 3);
 
         test_env.insert(
@@ -1719,7 +1721,11 @@ mod tests {
         let result = gc(&test_env).await;
         eprintln!("{result:?}");
         assert!(result.is_ok());
-        entries = fs::read_dir(output_archive_dir_path).unwrap();
-        assert!(entries.count() == 2);
+
+        assert!(!test_path_1.exists());
+        assert!(test_path_2.exists());
+        assert!(test_path_3.exists());
+
+        fs::remove_dir_all(&output_archive_dir_path).unwrap_or_default();
     }
 }
