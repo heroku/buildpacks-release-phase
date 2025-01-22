@@ -115,18 +115,43 @@ pub async fn gc<S: BuildHasher>(
     }
     match detect_storage_scheme(env) {
         Ok(scheme) if scheme == *"file" => gc_file(env),
-        Ok(scheme) if scheme == *"s3" => gc_s3(env),
+        Ok(scheme) if scheme == *"s3" => gc_s3(env).await,
         Ok(scheme) => Err(ReleaseArtifactsError::StorageURLUnsupportedScheme(scheme)),
         Err(e) => Err(e),
     }
 }
 
-fn gc_s3<S: BuildHasher>(env: &HashMap<String, String, S>) -> Result<(), ReleaseArtifactsError> {
+async fn gc_s3<S: BuildHasher>(env: &HashMap<String, String, S>) -> Result<(), ReleaseArtifactsError> {
     guard_s3(env)?;
+            let archive_name = generate_archive_name::<S>(env);
+            eprintln!("load-release-artifacts downloading archive: {archive_name}");
+            let (bucket_name, bucket_region, bucket_key) =
+                generate_s3_storage_location(env, &archive_name)?;
+            let s3 = generate_s3_client(env, bucket_region).await;
+            download_specific_or_latest_with_client(&s3, &bucket_name, &bucket_key, dir).await
+    // archives = list_s3_archives
+    //
+    // fn remove_last_2_recent(archives) {
+    //   archives.sort_by(|x| parse_date(x.LastModified)).slice(0,2)
+    // }
+    //
+    // filtered = remove_last_2_recent(archives)
+    //
+    // fn delete_s3_archive (archive)
+    //
+    // for archive in filtered {
+    //   match delete_s3_archive() {
+    //      Ok(_) => Ok()
+    //      Err(err) => return GcS3Err(err)
+    //   }
+    // }
+    //
+    // Ok(())
     Ok(())
 }
 
 fn gc_file<S: BuildHasher>(env: &HashMap<String, String, S>) -> Result<(), ReleaseArtifactsError> {
+    // We do not run `guard_file` here because we do not care about RELEASE_ID
     let parsed_url = Url::parse(&env["STATIC_ARTIFACTS_URL"])
         .map_err(ReleaseArtifactsError::StorageURLInvalid)?;
 
@@ -1728,4 +1753,35 @@ mod tests {
 
         fs::remove_dir_all(&output_archive_dir_path).unwrap_or_default();
     }
+
+    #[tokio::test]
+    async fn garbage_collect_should_remove_s3_archives_older_than_the_first_two() {
+
+        let list_object_1 = ReplayEvent::new(
+            http::Request::builder()
+                .method("GET")
+                .uri("https://test-bucket.s3.us-east-1.amazonaws.com/?list-type=2&prefix=sub%2Fpath%2F")
+                .body(SdkBody::empty())
+                .unwrap(),
+            http::Response::builder()
+                .status(200)
+                .body(SdkBody::from(r"
+                    <ListBucketResult>
+                        <IsTruncated>false</IsTruncated>
+                    </ListBucketResult>",
+                ))
+                .unwrap(),
+        );
+        let replay_client = StaticReplayClient::new(vec![list_object_1]);
+        let s3 = aws_sdk_s3::Client::from_conf(
+            aws_sdk_s3::Config::builder()
+                .behavior_version(BehaviorVersion::latest())
+                .credentials_provider(make_s3_test_credentials())
+                .region(aws_sdk_s3::config::Region::new("us-east-1"))
+                .http_client(replay_client.clone())
+                .build(),
+        );
+    }
 }
+
+
