@@ -7,7 +7,7 @@ use regex::Regex;
 use std::{
     collections::HashMap,
     env,
-    fs::{self, read_dir, DirEntry, File, FileType},
+    fs::{self, File},
     hash::BuildHasher,
     io::{Read, Write},
     path::{Path, PathBuf},
@@ -16,7 +16,11 @@ use std::{
 use tar::Archive;
 
 use aws_config::meta::region::RegionProviderChain;
-use aws_sdk_s3::{config::Credentials, config::Region, Client};
+use aws_sdk_s3::{
+    config::{Credentials, Region},
+    types::Object,
+    Client,
+};
 use url::Url;
 
 use tokio as _;
@@ -121,22 +125,26 @@ pub async fn gc<S: BuildHasher>(
     }
 }
 
-async fn gc_s3<S: BuildHasher>(env: &HashMap<String, String, S>) -> Result<(), ReleaseArtifactsError> {
+async fn gc_s3<S: BuildHasher>(
+    env: &HashMap<String, String, S>,
+) -> Result<(), ReleaseArtifactsError> {
     guard_s3(env)?;
-            let archive_name = generate_archive_name::<S>(env);
-            eprintln!("load-release-artifacts downloading archive: {archive_name}");
-            let (bucket_name, bucket_region, bucket_key) =
-                generate_s3_storage_location(env, &archive_name)?;
-            let s3 = generate_s3_client(env, bucket_region).await;
-            download_specific_or_latest_with_client(&s3, &bucket_name, &bucket_key, dir).await
-    // archives = list_s3_archives
-    //
-    // fn remove_last_2_recent(archives) {
-    //   archives.sort_by(|x| parse_date(x.LastModified)).slice(0,2)
-    // }
-    //
-    // filtered = remove_last_2_recent(archives)
-    //
+    let (bucket_name, bucket_region_from_url, bucket_path) =
+        parse_s3_url(&env["STATIC_ARTIFACTS_URL"])?;
+    eprintln!("gc-release-artifacts listing s3 archives : {bucket_name}");
+    let bucket_region =
+        bucket_region_from_url.or_else(|| env.get("STATIC_ARTIFACTS_REGION").cloned());
+    let s3 = generate_s3_client(env, bucket_region).await;
+
+    let mut objects = list_bucket_objects_with_client(&s3, &bucket_name).await?;
+    // TODO handle date parsing error
+    objects.sort_by_key(|s| s.last_modified.unwrap());
+
+    let older_than_latest_two = objects[2..].to_vec();
+    for object in older_than_latest_two {
+        delete_object_with_client(&s3, &bucket_name, &object.key.unwrap()).await?;
+    }
+
     // fn delete_s3_archive (archive)
     //
     // for archive in filtered {
@@ -262,6 +270,40 @@ pub async fn download_specific_or_latest_with_client(
             _ => Err(e),
         },
     }
+}
+
+pub async fn list_bucket_objects_with_client(
+    s3: &aws_sdk_s3::Client,
+    bucket_name: &String,
+) -> Result<Vec<Object>, ReleaseArtifactsError> {
+    let response = s3
+        .list_objects_v2()
+        .bucket(bucket_name)
+        .send()
+        .await
+        .map_err(ReleaseArtifactsError::from)?;
+    // TODO handle error
+    Ok(response.contents.unwrap())
+}
+
+pub async fn delete_object_with_client(
+    s3: &aws_sdk_s3::Client,
+    bucket_name: &String,
+    key: &String,
+) -> Result<bool, ReleaseArtifactsError> {
+    let response = s3
+        .delete_object()
+        .bucket(bucket_name)
+        .key(key)
+        .send()
+        .await
+        .map_err(ReleaseArtifactsError::from)?;
+    // TODO handle response.delete_marker being false
+    //   maybe not worth bubbling up
+    // if response.delete_marker.is_some_and(|s| !s) {
+    //     todo()
+    // }
+    Ok(response.delete_marker.unwrap())
 }
 
 pub async fn download_with_client(
@@ -1725,11 +1767,15 @@ mod tests {
 
         let test_path_1 = output_archive_dir_path.join("test1.tgz");
         let test_file_1 = File::create_new(test_path_1.clone()).unwrap();
-        test_file_1.set_modified(SystemTime::now() - Duration::new(120, 0)).unwrap();
+        test_file_1
+            .set_modified(SystemTime::now() - Duration::new(120, 0))
+            .unwrap();
 
         let test_path_2 = output_archive_dir_path.join("test2.tgz");
         let test_file_2 = File::create_new(test_path_2.clone()).unwrap();
-        test_file_2.set_modified(SystemTime::now() - Duration::new(60, 0)).unwrap();
+        test_file_2
+            .set_modified(SystemTime::now() - Duration::new(60, 0))
+            .unwrap();
 
         let test_path_3 = output_archive_dir_path.join("test3.tgz");
         let test_file_3 = File::create_new(test_path_3.clone()).unwrap();
@@ -1756,7 +1802,6 @@ mod tests {
 
     #[tokio::test]
     async fn garbage_collect_should_remove_s3_archives_older_than_the_first_two() {
-
         let list_object_1 = ReplayEvent::new(
             http::Request::builder()
                 .method("GET")
@@ -1783,5 +1828,3 @@ mod tests {
         );
     }
 }
-
-
