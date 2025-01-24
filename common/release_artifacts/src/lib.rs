@@ -129,7 +129,7 @@ async fn gc_s3<S: BuildHasher>(
     env: &HashMap<String, String, S>,
 ) -> Result<(), ReleaseArtifactsError> {
     guard_s3(env)?;
-    let (bucket_name, bucket_region_from_url, bucket_path) =
+    let (bucket_name, bucket_region_from_url, _bucket_path) =
         parse_s3_url(&env["STATIC_ARTIFACTS_URL"])?;
     eprintln!("gc-release-artifacts listing s3 archives : {bucket_name}");
     let bucket_region =
@@ -145,16 +145,6 @@ async fn gc_s3<S: BuildHasher>(
         delete_object_with_client(&s3, &bucket_name, &object.key.unwrap()).await?;
     }
 
-    // fn delete_s3_archive (archive)
-    //
-    // for archive in filtered {
-    //   match delete_s3_archive() {
-    //      Ok(_) => Ok()
-    //      Err(err) => return GcS3Err(err)
-    //   }
-    // }
-    //
-    // Ok(())
     Ok(())
 }
 
@@ -303,7 +293,7 @@ pub async fn delete_object_with_client(
     // if response.delete_marker.is_some_and(|s| !s) {
     //     todo()
     // }
-    Ok(response.delete_marker.unwrap())
+    Ok(response.delete_marker.unwrap_or_default())
 }
 
 pub async fn download_with_client(
@@ -623,7 +613,7 @@ mod tests {
     use aws_smithy_types::body::SdkBody;
 
     use crate::{
-        capture_env, create_archive, detect_storage_scheme,
+        capture_env, create_archive, delete_object_with_client, detect_storage_scheme,
         download_specific_or_latest_with_client, download_with_client,
         errors::ReleaseArtifactsError, extract_archive, find_latest_with_client, gc,
         generate_archive_name, generate_file_storage_location, generate_s3_client,
@@ -1802,22 +1792,19 @@ mod tests {
 
     #[tokio::test]
     async fn garbage_collect_should_remove_s3_archives_older_than_the_first_two() {
-        let list_object_1 = ReplayEvent::new(
+        let requests = ReplayEvent::new(
             http::Request::builder()
-                .method("GET")
-                .uri("https://test-bucket.s3.us-east-1.amazonaws.com/?list-type=2&prefix=sub%2Fpath%2F")
+                .method("DELETE")
+                .uri("https://test-bucket.s3.us-east-1.amazonaws.com/test-archive-1.tgz?x-id=DeleteObject")
                 .body(SdkBody::empty())
                 .unwrap(),
             http::Response::builder()
                 .status(200)
-                .body(SdkBody::from(r"
-                    <ListBucketResult>
-                        <IsTruncated>false</IsTruncated>
-                    </ListBucketResult>",
-                ))
+                .header("x-amz-delete-marker", "true")
+                .body(SdkBody::empty())
                 .unwrap(),
         );
-        let replay_client = StaticReplayClient::new(vec![list_object_1]);
+        let replay_client = StaticReplayClient::new(vec![requests]);
         let s3 = aws_sdk_s3::Client::from_conf(
             aws_sdk_s3::Config::builder()
                 .behavior_version(BehaviorVersion::latest())
@@ -1826,5 +1813,12 @@ mod tests {
                 .http_client(replay_client.clone())
                 .build(),
         );
+
+        let bucket_name = String::from("test-bucket");
+        let key = String::from("test-archive-1.tgz");
+        let sut = delete_object_with_client(&s3, &bucket_name, &key).await;
+
+        assert!(sut.is_ok());
+        assert!(sut.is_ok_and(|x| x));
     }
 }
