@@ -138,7 +138,7 @@ async fn gc_s3<S: BuildHasher>(
 
     let mut objects = list_bucket_objects_with_client(&s3, &bucket_name).await?;
     // TODO handle date parsing error
-    objects.sort_by_key(|s| s.last_modified.unwrap());
+    objects.sort_by_key(|s| s.last_modified.unwrap_or_else(|| DateTime::from_secs(0)));
 
     let older_than_latest_two = objects[2..].to_vec();
     for object in older_than_latest_two {
@@ -264,16 +264,14 @@ pub async fn download_specific_or_latest_with_client(
 
 pub async fn list_bucket_objects_with_client(
     s3: &aws_sdk_s3::Client,
-    bucket_name: &String,
+    bucket_name: &str,
 ) -> Result<Vec<Object>, ReleaseArtifactsError> {
-    let response = s3
-        .list_objects_v2()
-        .bucket(bucket_name)
-        .send()
-        .await
-        .map_err(ReleaseArtifactsError::from)?;
-    // TODO handle error
-    Ok(response.contents.unwrap())
+    let response = s3.list_objects_v2().bucket(bucket_name).send().await?;
+    if let Some(contents) = response.contents {
+        Ok(contents)
+    } else {
+        Err(ReleaseArtifactsError::StorageError(format!("s3 bucket {} had no contents", bucket_name)))
+    }
 }
 
 pub async fn delete_object_with_client(
@@ -286,8 +284,7 @@ pub async fn delete_object_with_client(
         .bucket(bucket_name)
         .key(key)
         .send()
-        .await
-        .map_err(ReleaseArtifactsError::from)?;
+        .await?;
     // TODO handle response.delete_marker being false
     //   maybe not worth bubbling up
     // if response.delete_marker.is_some_and(|s| !s) {
@@ -349,7 +346,7 @@ pub async fn download_with_client(
             e,
             format!("during download_with_client fs::remove_file({temp_archive_path:?})"),
         )
-    })?;
+   })?;
 
     Ok(())
 }
@@ -359,26 +356,18 @@ pub async fn find_latest_with_client(
     bucket_name: &String,
     bucket_key_prefix: &String,
 ) -> Result<Option<String>, ReleaseArtifactsError> {
-    let output = s3
-        .list_objects_v2()
-        .bucket(bucket_name)
-        .prefix(bucket_key_prefix)
-        .send()
-        .await
-        .map_err(ReleaseArtifactsError::from)?;
-    let latest_key = output.contents.and_then(|mut c| {
-        if c.is_empty() {
-            return None;
-        }
-        c.sort_by_key(|k| {
-            k.last_modified()
-                .map_or_else(|| DateTime::from_secs(0), std::borrow::ToOwned::to_owned)
-        });
-        c.last()
-            .expect("should have at least one sorted object")
-            .key()
-            .map(std::string::ToString::to_string)
-    });
+    let mut output = list_bucket_objects_with_client(&s3, &bucket_name).await?;
+    if output.is_empty() {
+        return Ok(None);
+    }
+
+    output.sort_by_key(|s| s.last_modified.unwrap_or_else(|| DateTime::from_secs(0)));
+
+    let latest_key = output.last()
+        .expect("should have at least one sorted object")
+        .key()
+        .map(std::string::ToString::to_string);
+
     Ok(latest_key)
 }
 
@@ -1696,7 +1685,6 @@ mod tests {
         let output_dir = format!("artifact-from-test-{unique}");
         let output_path = Path::new(&output_dir);
         fs::remove_dir_all(output_path).unwrap_or_default();
-
         extract_archive(Path::new("test/fixtures/static-artifacts.tgz"), output_path).unwrap();
         let result_metadata = fs::metadata(output_path).unwrap();
         assert!(result_metadata.is_dir());
