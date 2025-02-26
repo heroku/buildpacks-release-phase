@@ -7,7 +7,6 @@ use release_artifacts::{capture_env, gc};
 
 #[tokio::main]
 async fn main() {
-
     let env = capture_env(Path::new("/etc/heroku"));
 
     match gc(&env).await {

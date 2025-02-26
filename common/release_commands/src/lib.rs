@@ -162,7 +162,7 @@ pub fn generate_commands_config(
         };
         let gc_exec = Executable {
             command: "gc-release-artifacts".to_string(),
-            args: Some([]),
+            args: Some(vec![]),
             source: Some("Heroku Release Phase Buildpack".to_string()),
         };
         commands.release = Some(

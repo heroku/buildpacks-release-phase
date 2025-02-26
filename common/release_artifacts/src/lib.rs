@@ -270,7 +270,10 @@ pub async fn list_bucket_objects_with_client(
     if let Some(contents) = response.contents {
         Ok(contents)
     } else {
-        Err(ReleaseArtifactsError::StorageError(format!("s3 bucket {} had no contents", bucket_name)))
+        Err(ReleaseArtifactsError::StorageError(format!(
+            "s3 bucket {} had no contents",
+            bucket_name
+        )))
     }
 }
 
@@ -346,7 +349,7 @@ pub async fn download_with_client(
             e,
             format!("during download_with_client fs::remove_file({temp_archive_path:?})"),
         )
-   })?;
+    })?;
 
     Ok(())
 }
@@ -354,7 +357,8 @@ pub async fn download_with_client(
 pub async fn find_latest_with_client(
     s3: &aws_sdk_s3::Client,
     bucket_name: &String,
-    bucket_key_prefix: &String,
+    // Note: we don't use this prefix
+    _bucket_key_prefix: &String,
 ) -> Result<Option<String>, ReleaseArtifactsError> {
     let mut output = list_bucket_objects_with_client(&s3, &bucket_name).await?;
     if output.is_empty() {
@@ -363,7 +367,8 @@ pub async fn find_latest_with_client(
 
     output.sort_by_key(|s| s.last_modified.unwrap_or_else(|| DateTime::from_secs(0)));
 
-    let latest_key = output.last()
+    let latest_key = output
+        .last()
         .expect("should have at least one sorted object")
         .key()
         .map(std::string::ToString::to_string);
