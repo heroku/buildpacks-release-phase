@@ -67,6 +67,14 @@ pub(crate) fn setup_release_phase(
         )
         .map_err(ReleasePhaseBuildpackError::CannotInstallArtifactSaver)?;
 
+        let gc_exec = exec_destination.join("gc-release-artifacts");
+        log_info(format!("  {gc_exec:?}"));
+        fs::copy(
+            additional_buildpack_binary_path!("gc-release-artifacts"),
+            gc_exec,
+        )
+        .map_err(ReleasePhaseBuildpackError::CannotInstallArtifactGc)?;
+
         let web_exec_destination = release_phase_layer.path().join("exec.d/web");
         let load_exec = web_exec_destination.join("load-release-artifacts");
         log_info(format!("  {load_exec:?}"));
