@@ -160,7 +160,19 @@ pub fn generate_commands_config(
             args: Some(vec!["static-artifacts/".to_string()]),
             source: Some("Heroku Release Phase Buildpack".to_string()),
         };
-        commands.release = Some([vec![save_exec], commands.release.map_or(vec![], |v| v)].concat());
+        let gc_exec = Executable {
+            command: "gc-release-artifacts".to_string(),
+            args: Some(vec![]),
+            source: Some("Heroku Release Phase Buildpack".to_string()),
+        };
+        commands.release = Some(
+            [
+                vec![save_exec],
+                commands.release.map_or(vec![], |v| v),
+                vec![gc_exec],
+            ]
+            .concat(),
+        );
     }
 
     Ok(commands)

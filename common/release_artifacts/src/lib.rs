@@ -11,11 +11,16 @@ use std::{
     hash::BuildHasher,
     io::{Read, Write},
     path::{Path, PathBuf},
+    time::SystemTime,
 };
 use tar::Archive;
 
 use aws_config::meta::region::RegionProviderChain;
-use aws_sdk_s3::{config::Credentials, config::Region, Client};
+use aws_sdk_s3::{
+    config::{Credentials, Region},
+    types::Object,
+    Client,
+};
 use url::Url;
 
 use tokio as _;
@@ -75,9 +80,13 @@ pub async fn load<S: BuildHasher>(
     env: &HashMap<String, String, S>,
     dir: &Path,
 ) -> Result<String, ReleaseArtifactsError> {
+    if !env.contains_key("STATIC_ARTIFACTS_URL") {
+        return Err(ReleaseArtifactsError::ConfigMissing(
+            "STATIC_ARTIFACTS_URL is required".to_string(),
+        ));
+    }
     match detect_storage_scheme(env) {
         Ok(scheme) if scheme == *"file" => {
-            guard_file(env)?;
             let archive_name = generate_archive_name::<S>(env);
             eprintln!("load-release-artifacts reading archive: {archive_name}");
             // This file scheme does not currently find latest if the specific release ID is missing.
@@ -97,6 +106,104 @@ pub async fn load<S: BuildHasher>(
         Ok(scheme) => Err(ReleaseArtifactsError::StorageURLUnsupportedScheme(scheme)),
         Err(e) => Err(e),
     }
+}
+
+#[allow(clippy::unused_async)]
+pub async fn gc<S: BuildHasher>(
+    env: &HashMap<String, String, S>,
+) -> Result<(), ReleaseArtifactsError> {
+    if !env.contains_key("STATIC_ARTIFACTS_URL") {
+        return Err(ReleaseArtifactsError::ConfigMissing(
+            "STATIC_ARTIFACTS_URL is required".to_string(),
+        ));
+    }
+    match detect_storage_scheme(env) {
+        Ok(scheme) if scheme == *"file" => gc_file(env),
+        Ok(scheme) if scheme == *"s3" => gc_s3(env).await,
+        Ok(scheme) => Err(ReleaseArtifactsError::StorageURLUnsupportedScheme(scheme)),
+        Err(e) => Err(e),
+    }
+}
+
+async fn gc_s3<S: BuildHasher>(
+    env: &HashMap<String, String, S>,
+) -> Result<(), ReleaseArtifactsError> {
+    guard_s3(env)?;
+    let (bucket_name, bucket_region_from_url, _bucket_path) =
+        parse_s3_url(&env["STATIC_ARTIFACTS_URL"])?;
+    eprintln!("gc-release-artifacts listing s3 archives : {bucket_name}");
+    let bucket_region =
+        bucket_region_from_url.or_else(|| env.get("STATIC_ARTIFACTS_REGION").cloned());
+    let s3 = generate_s3_client(env, bucket_region).await;
+
+    let mut objects = list_bucket_objects_with_client(&s3, &bucket_name).await?;
+    // TODO handle date parsing error
+    objects.sort_by_key(|s| s.last_modified.unwrap_or_else(|| DateTime::from_secs(0)));
+
+    let older_than_latest_two = objects[2..].to_vec();
+    for object in older_than_latest_two {
+        delete_object_with_client(
+            &s3,
+            &bucket_name,
+            &object.key.expect("bucket key should exist"),
+        )
+        .await?;
+    }
+
+    Ok(())
+}
+
+fn gc_file<S: BuildHasher>(env: &HashMap<String, String, S>) -> Result<(), ReleaseArtifactsError> {
+    // We do not run `guard_file` here because we do not care about RELEASE_ID
+    let parsed_url = Url::parse(&env["STATIC_ARTIFACTS_URL"])
+        .map_err(ReleaseArtifactsError::StorageURLInvalid)?;
+
+    let entries = sorted_dir_entries(parsed_url.path())?;
+    if entries.len() >= 2 {
+        for filename in &entries[2..] {
+            let filepath = Path::new(parsed_url.path()).join(filename);
+            fs::remove_file(filepath).map_err(|e| {
+                ReleaseArtifactsError::ArchiveError(
+                    e,
+                    format!("Could not remove file {filename} during artifact garbage collection."),
+                )
+            })?;
+        }
+    }
+    Ok(())
+}
+
+fn sorted_dir_entries(path: &str) -> Result<Vec<String>, ReleaseArtifactsError> {
+    let entries = fs::read_dir(path).map_err(|e| {
+        ReleaseArtifactsError::ArchiveError(
+            e,
+            format!("Could not read directory {path} when reading directory entries."),
+        )
+    })?;
+
+    let mut entries_with_mod_time: Vec<(String, SystemTime)> = vec![];
+    for entry in entries.flatten() {
+        // TODO cleanup
+        if let Ok(metadata) = entry.metadata() {
+            if let Ok(filename) = entry.file_name().into_string() {
+                let ext = Path::new(filename.as_str()).extension();
+                let has_correct_ext = ext.is_some_and(|e| e == "tgz");
+                if metadata.is_file() && has_correct_ext {
+                    if let Ok(modified) = metadata.modified() {
+                        entries_with_mod_time.append(vec![(filename.clone(), modified)].as_mut());
+                    };
+                }
+            }
+        }
+    }
+
+    entries_with_mod_time.sort_by(|a, b| b.1.cmp(&a.1));
+
+    let result = entries_with_mod_time
+        .iter()
+        .map(|tup| tup.0.clone())
+        .collect();
+    Ok(result)
 }
 
 pub async fn upload_with_client(
@@ -160,6 +267,39 @@ pub async fn download_specific_or_latest_with_client(
     }
 }
 
+pub async fn list_bucket_objects_with_client(
+    s3: &aws_sdk_s3::Client,
+    bucket_name: &str,
+) -> Result<Vec<Object>, ReleaseArtifactsError> {
+    let response = s3.list_objects_v2().bucket(bucket_name).send().await?;
+    if let Some(contents) = response.contents {
+        Ok(contents)
+    } else {
+        Err(ReleaseArtifactsError::StorageError(format!(
+            "s3 bucket {bucket_name} had no contents"
+        )))
+    }
+}
+
+pub async fn delete_object_with_client(
+    s3: &aws_sdk_s3::Client,
+    bucket_name: &String,
+    key: &String,
+) -> Result<bool, ReleaseArtifactsError> {
+    let response = s3
+        .delete_object()
+        .bucket(bucket_name)
+        .key(key)
+        .send()
+        .await?;
+    // TODO handle response.delete_marker being false
+    //   maybe not worth bubbling up
+    // if response.delete_marker.is_some_and(|s| !s) {
+    //     todo()
+    // }
+    Ok(response.delete_marker.unwrap_or_default())
+}
+
 pub async fn download_with_client(
     s3: &aws_sdk_s3::Client,
     bucket_name: &String,
@@ -220,29 +360,23 @@ pub async fn download_with_client(
 
 pub async fn find_latest_with_client(
     s3: &aws_sdk_s3::Client,
-    bucket_name: &String,
-    bucket_key_prefix: &String,
+    bucket_name: &str,
+    // Note: we don't use this prefix
+    _bucket_key_prefix: &str,
 ) -> Result<Option<String>, ReleaseArtifactsError> {
-    let output = s3
-        .list_objects_v2()
-        .bucket(bucket_name)
-        .prefix(bucket_key_prefix)
-        .send()
-        .await
-        .map_err(ReleaseArtifactsError::from)?;
-    let latest_key = output.contents.and_then(|mut c| {
-        if c.is_empty() {
-            return None;
-        }
-        c.sort_by_key(|k| {
-            k.last_modified()
-                .map_or_else(|| DateTime::from_secs(0), std::borrow::ToOwned::to_owned)
-        });
-        c.last()
-            .expect("should have at least one sorted object")
-            .key()
-            .map(std::string::ToString::to_string)
-    });
+    let mut output = list_bucket_objects_with_client(s3, bucket_name).await?;
+    if output.is_empty() {
+        return Ok(None);
+    }
+
+    output.sort_by_key(|s| s.last_modified.unwrap_or_else(|| DateTime::from_secs(0)));
+
+    let latest_key = output
+        .last()
+        .expect("should have at least one sorted object")
+        .key()
+        .map(std::string::ToString::to_string);
+
     Ok(latest_key)
 }
 
@@ -465,6 +599,7 @@ mod tests {
         fs::{self, File},
         io::{Read, Write},
         path::Path,
+        time::{Duration, SystemTime},
     };
 
     use aws_config::BehaviorVersion;
@@ -476,12 +611,12 @@ mod tests {
     use aws_smithy_types::body::SdkBody;
 
     use crate::{
-        capture_env, create_archive, detect_storage_scheme,
+        capture_env, create_archive, delete_object_with_client, detect_storage_scheme,
         download_specific_or_latest_with_client, download_with_client,
-        errors::ReleaseArtifactsError, extract_archive, find_latest_with_client,
+        errors::ReleaseArtifactsError, extract_archive, find_latest_with_client, gc,
         generate_archive_name, generate_file_storage_location, generate_s3_client,
         generate_s3_storage_location, guard_file, guard_s3, load, make_s3_test_credentials,
-        parse_s3_url, save, upload_with_client,
+        parse_s3_url, save, sorted_dir_entries, upload_with_client,
     };
 
     #[test]
@@ -1043,6 +1178,17 @@ mod tests {
         fs::remove_dir_all(output_dir).expect("temporary directory should be deleted");
     }
 
+    #[test]
+    fn sorted_dir_entries_succeeds() {
+        let result = sorted_dir_entries("test/fixtures/archives-in-storage");
+        eprintln!("{result:?}");
+        assert!(result.is_ok());
+        let result = result.unwrap();
+        assert_eq!(result[0], String::from("release-angel.tgz"));
+        assert_eq!(result[1], String::from("release-funzzies.tgz"));
+        assert_eq!(result[2], String::from("release-bork.tgz"));
+    }
+
     #[tokio::test]
     async fn find_latest_with_client_succeeds() {
         let list_object_1 = ReplayEvent::new(
@@ -1082,9 +1228,7 @@ mod tests {
                 .build(),
         );
 
-        let result =
-            find_latest_with_client(&s3, &"test-bucket".to_string(), &"sub/path/".to_string())
-                .await;
+        let result = find_latest_with_client(&s3, "test-bucket", "sub/path/").await;
 
         println!("find_latest_with_client_succeeds result {result:#?}");
         assert!(result.is_ok());
@@ -1121,9 +1265,7 @@ mod tests {
                 .build(),
         );
 
-        let result =
-            find_latest_with_client(&s3, &"test-bucket".to_string(), &"sub/path/".to_string())
-                .await;
+        let result = find_latest_with_client(&s3, &"test-bucket", "sub/path/").await;
 
         println!("find_latest_with_client_succeeds result {result:#?}");
         assert!(result.is_ok());
@@ -1548,7 +1690,6 @@ mod tests {
         let output_dir = format!("artifact-from-test-{unique}");
         let output_path = Path::new(&output_dir);
         fs::remove_dir_all(output_path).unwrap_or_default();
-
         extract_archive(Path::new("test/fixtures/static-artifacts.tgz"), output_path).unwrap();
         let result_metadata = fs::metadata(output_path).unwrap();
         assert!(result_metadata.is_dir());
@@ -1570,5 +1711,107 @@ mod tests {
         extract_archive(Path::new("non-existent-path"), output_path)
             .expect_err("should fail for missing source file");
         fs::remove_dir_all(output_path).unwrap_or_default();
+    }
+
+    #[tokio::test]
+    async fn garbage_collect_should_succeed_with_empty_dir() {
+        let mut test_env = HashMap::new();
+
+        // TODO: file test_env helper
+        let unique = Uuid::new_v4();
+        let output_archive_dir = format!("test-file-storage-location-{unique}");
+        let abs_root = env::current_dir().expect("should have a current working directory");
+        let output_archive_dir_path = Path::new(&abs_root).join(output_archive_dir.as_str());
+        fs::remove_dir_all(&output_archive_dir_path).unwrap_or_default();
+        fs::create_dir_all(&output_archive_dir_path).unwrap_or_default();
+
+        test_env.insert(
+            "STATIC_ARTIFACTS_URL".to_string(),
+            format!("file://{}", output_archive_dir_path.to_string_lossy()),
+        );
+
+        let result = gc(&test_env).await;
+
+        eprintln!("result is: {result:?}");
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn garbage_collect_should_remove_files_older_than_the_first_two() {
+        let mut test_env = HashMap::new();
+
+        // TODO: file test_env helper
+        let unique = Uuid::new_v4();
+        let output_archive_dir = format!("test-file-storage-location-{unique}");
+        let abs_root = env::current_dir().expect("should have a current working directory");
+        let output_archive_dir_path = Path::new(&abs_root).join(output_archive_dir.as_str());
+        fs::remove_dir_all(&output_archive_dir_path).unwrap_or_default();
+        fs::create_dir_all(&output_archive_dir_path).unwrap_or_default();
+
+        let test_path_1 = output_archive_dir_path.join("test1.tgz");
+        let test_file_1 = File::create_new(test_path_1.clone()).unwrap();
+        test_file_1
+            .set_modified(SystemTime::now() - Duration::new(120, 0))
+            .unwrap();
+
+        let test_path_2 = output_archive_dir_path.join("test2.tgz");
+        let test_file_2 = File::create_new(test_path_2.clone()).unwrap();
+        test_file_2
+            .set_modified(SystemTime::now() - Duration::new(60, 0))
+            .unwrap();
+
+        let test_path_3 = output_archive_dir_path.join("test3.tgz");
+        let test_file_3 = File::create_new(test_path_3.clone()).unwrap();
+        test_file_3.set_modified(SystemTime::now()).unwrap();
+
+        let entries = fs::read_dir(output_archive_dir_path.clone()).unwrap();
+        assert!(entries.count() == 3);
+
+        test_env.insert(
+            "STATIC_ARTIFACTS_URL".to_string(),
+            format!("file://{}", output_archive_dir_path.to_string_lossy()),
+        );
+
+        let result = gc(&test_env).await;
+        eprintln!("{result:?}");
+        assert!(result.is_ok());
+
+        assert!(!test_path_1.exists());
+        assert!(test_path_2.exists());
+        assert!(test_path_3.exists());
+
+        fs::remove_dir_all(&output_archive_dir_path).unwrap_or_default();
+    }
+
+    #[tokio::test]
+    async fn garbage_collect_should_remove_s3_archives_older_than_the_first_two() {
+        let requests = ReplayEvent::new(
+            http::Request::builder()
+                .method("DELETE")
+                .uri("https://test-bucket.s3.us-east-1.amazonaws.com/test-archive-1.tgz?x-id=DeleteObject")
+                .body(SdkBody::empty())
+                .unwrap(),
+            http::Response::builder()
+                .status(200)
+                .header("x-amz-delete-marker", "true")
+                .body(SdkBody::empty())
+                .unwrap(),
+        );
+        let replay_client = StaticReplayClient::new(vec![requests]);
+        let s3 = aws_sdk_s3::Client::from_conf(
+            aws_sdk_s3::Config::builder()
+                .behavior_version(BehaviorVersion::latest())
+                .credentials_provider(make_s3_test_credentials())
+                .region(aws_sdk_s3::config::Region::new("us-east-1"))
+                .http_client(replay_client.clone())
+                .build(),
+        );
+
+        let bucket_name = String::from("test-bucket");
+        let key = String::from("test-archive-1.tgz");
+        let sut = delete_object_with_client(&s3, &bucket_name, &key).await;
+
+        assert!(sut.is_ok());
+        assert!(sut.is_ok_and(|x| x));
     }
 }

@@ -14,6 +14,7 @@ locally with a minimal example and open an issue in the buildpack's GitHub repos
 #[derive(Debug)]
 pub(crate) enum ReleasePhaseBuildpackError {
     CannotInstallArtifactSaver(std::io::Error),
+    CannotInstallArtifactGc(std::io::Error),
     CannotInstallArtifactLoader(std::io::Error),
     CannotInstallCommandExecutor(std::io::Error),
     CannotCreatWebExecD(std::io::Error),
@@ -37,8 +38,15 @@ fn on_buildpack_error(error: ReleasePhaseBuildpackError, logger: Box<dyn Started
             print_error_details(logger, &error)
                 .announce()
                 .error(&formatdoc! {"
-                Cannot install save-release-artifacts for {buildpack_name}
-            ", buildpack_name = fmt::value(BUILDPACK_NAME) });
+                        Cannot install save-release-artifacts for {buildpack_name}
+                    ", buildpack_name = fmt::value(BUILDPACK_NAME) });
+        }
+        ReleasePhaseBuildpackError::CannotInstallArtifactGc(error) => {
+            print_error_details(logger, &error)
+                .announce()
+                .error(&formatdoc! {"
+        Cannot install gc-release-artifacts for {buildpack_name}
+    ", buildpack_name = fmt::value(BUILDPACK_NAME) });
         }
         ReleasePhaseBuildpackError::CannotInstallArtifactLoader(error) => {
             print_error_details(logger, &error)
