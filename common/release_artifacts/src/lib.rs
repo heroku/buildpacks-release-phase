@@ -142,7 +142,7 @@ async fn gc_s3<S: BuildHasher>(
 
     let older_than_latest_two = objects[2..].to_vec();
     for object in older_than_latest_two {
-        delete_object_with_client(&s3, &bucket_name, &object.key.unwrap()).await?;
+        delete_object_with_client(&s3, &bucket_name, &object.key.expect("bucket key should exist")).await?;
     }
 
     Ok(())
@@ -155,14 +155,14 @@ fn gc_file<S: BuildHasher>(env: &HashMap<String, String, S>) -> Result<(), Relea
 
     let entries = sorted_dir_entries(parsed_url.path())?;
     if entries.len() >= 2 {
-        for filename in entries[2..].iter() {
+        for filename in &entries[2..] {
             let filepath = Path::new(parsed_url.path()).join(filename);
             fs::remove_file(filepath).map_err(|e| {
                 ReleaseArtifactsError::ArchiveError(
                     e,
                     format!("Could not remove file {filename} during artifact garbage collection."),
                 )
-            })?
+            })?;
         }
     }
     Ok(())
@@ -271,8 +271,7 @@ pub async fn list_bucket_objects_with_client(
         Ok(contents)
     } else {
         Err(ReleaseArtifactsError::StorageError(format!(
-            "s3 bucket {} had no contents",
-            bucket_name
+            "s3 bucket {bucket_name} had no contents"
         )))
     }
 }
@@ -356,11 +355,11 @@ pub async fn download_with_client(
 
 pub async fn find_latest_with_client(
     s3: &aws_sdk_s3::Client,
-    bucket_name: &String,
+    bucket_name: &str,
     // Note: we don't use this prefix
-    _bucket_key_prefix: &String,
+    _bucket_key_prefix: &str,
 ) -> Result<Option<String>, ReleaseArtifactsError> {
-    let mut output = list_bucket_objects_with_client(&s3, &bucket_name).await?;
+    let mut output = list_bucket_objects_with_client(s3, bucket_name).await?;
     if output.is_empty() {
         return Ok(None);
     }
@@ -1225,7 +1224,7 @@ mod tests {
         );
 
         let result =
-            find_latest_with_client(&s3, &"test-bucket".to_string(), &"sub/path/".to_string())
+            find_latest_with_client(&s3, "test-bucket", "sub/path/")
                 .await;
 
         println!("find_latest_with_client_succeeds result {result:#?}");
@@ -1264,7 +1263,7 @@ mod tests {
         );
 
         let result =
-            find_latest_with_client(&s3, &"test-bucket".to_string(), &"sub/path/".to_string())
+            find_latest_with_client(&s3, &"test-bucket", "sub/path/")
                 .await;
 
         println!("find_latest_with_client_succeeds result {result:#?}");
@@ -1733,7 +1732,7 @@ mod tests {
         let result = gc(&test_env).await;
 
         eprintln!("result is: {result:?}");
-        assert!(result.is_ok())
+        assert!(result.is_ok());
     }
 
     #[tokio::test]
