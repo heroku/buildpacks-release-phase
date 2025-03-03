@@ -142,7 +142,12 @@ async fn gc_s3<S: BuildHasher>(
 
     let older_than_latest_two = objects[2..].to_vec();
     for object in older_than_latest_two {
-        delete_object_with_client(&s3, &bucket_name, &object.key.expect("bucket key should exist")).await?;
+        delete_object_with_client(
+            &s3,
+            &bucket_name,
+            &object.key.expect("bucket key should exist"),
+        )
+        .await?;
     }
 
     Ok(())
@@ -1223,9 +1228,7 @@ mod tests {
                 .build(),
         );
 
-        let result =
-            find_latest_with_client(&s3, "test-bucket", "sub/path/")
-                .await;
+        let result = find_latest_with_client(&s3, "test-bucket", "sub/path/").await;
 
         println!("find_latest_with_client_succeeds result {result:#?}");
         assert!(result.is_ok());
@@ -1262,9 +1265,7 @@ mod tests {
                 .build(),
         );
 
-        let result =
-            find_latest_with_client(&s3, &"test-bucket", "sub/path/")
-                .await;
+        let result = find_latest_with_client(&s3, &"test-bucket", "sub/path/").await;
 
         println!("find_latest_with_client_succeeds result {result:#?}");
         assert!(result.is_ok());
