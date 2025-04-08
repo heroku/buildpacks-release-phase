@@ -13,7 +13,7 @@ libherokubuildpack = { version = "=0.22.0", default-features = false, features =
 indoc = "2"
 release_artifacts = { path = "../../common/release_artifacts" }
 release_commands = { path = "../../common/release_commands" }
-tokio = { version = "1.40.0", features = ["macros", "rt-multi-thread"] }
+tokio = { version = "1.43.1", features = ["macros", "rt-multi-thread"] }
 toml = { version = "0.8", features = ["preserve_order"] }
 
 [dev-dependencies]
