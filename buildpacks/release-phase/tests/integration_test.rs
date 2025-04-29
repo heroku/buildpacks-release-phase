@@ -40,6 +40,27 @@ fn project_uses_release() {
 
 #[test]
 #[ignore = "integration test"]
+fn project_uses_release_error() {
+    release_phase_integration_test("./fixtures/project_uses_release_error", |ctx| {
+        assert_contains!(ctx.pack_stdout, "Release Phase");
+        assert_contains!(ctx.pack_stdout, "Successfully built image");
+        // This cannot test the exit code, but have confirmed locally that release process exits 1 in this situation.
+        start_container_entrypoint(
+            &ctx,
+            &mut ContainerConfig::new(),
+            &"release".to_string(),
+            |container| {
+                let log_output = container.logs_now();
+                assert_contains!(log_output.stderr, "release-phase plan");
+                assert_contains!(log_output.stderr, "I will fail");
+                assert_contains!(log_output.stderr, "release-phase failed");
+            },
+        );
+    });
+}
+
+#[test]
+#[ignore = "integration test"]
 fn project_uses_release_build() {
     release_phase_integration_test("./fixtures/project_uses_release_build", |ctx| {
         assert_contains!(ctx.pack_stdout, "Release Phase");
