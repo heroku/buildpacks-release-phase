@@ -181,7 +181,10 @@ pub async fn download_with_client(
     let mut archive = File::create(temp_archive_path).map_err(|e| {
         ReleaseArtifactsError::ArchiveError(
             e,
-            format!("during download_with_client File::create({temp_archive_path:?})"),
+            format!(
+                "during download_with_client File::create({})",
+                temp_archive_path.display(),
+            ),
         )
     })?;
 
@@ -207,7 +210,10 @@ pub async fn download_with_client(
     fs::remove_file(temp_archive_path).map_err(|e| {
         ReleaseArtifactsError::ArchiveError(
             e,
-            format!("during download_with_client fs::remove_file({temp_archive_path:?})"),
+            format!(
+                "during download_with_client fs::remove_file({})",
+                temp_archive_path.display(),
+            ),
         )
     })?;
 
@@ -403,7 +409,10 @@ pub fn create_archive(source_dir: &Path, destination: &Path) -> Result<(), Relea
     let output_file: File = File::create(destination).map_err(|e| {
         ReleaseArtifactsError::ArchiveError(
             e,
-            format!("during create_archive File::create({destination:?})"),
+            format!(
+                "during create_archive File::create({})",
+                destination.display(),
+            ),
         )
     })?;
     let gz = GzBuilder::new().write(output_file, Compression::default());
@@ -413,7 +422,10 @@ pub fn create_archive(source_dir: &Path, destination: &Path) -> Result<(), Relea
     tar.append_dir_all("", source_dir).map_err(|e| {
         ReleaseArtifactsError::ArchiveError(
             e,
-            format!("during create_archive tar.append_dir_all({source_dir:?})"),
+            format!(
+                "during create_archive tar.append_dir_all({})",
+                source_dir.display(),
+            ),
         )
     })?;
     tar.finish().map_err(|e| {
@@ -429,14 +441,20 @@ pub fn extract_archive(
     let source = File::open(source_file).map_err(|e| {
         ReleaseArtifactsError::ArchiveError(
             e,
-            format!("during extract_archive File::open({source_file:?})"),
+            format!(
+                "during extract_archive File::open({})",
+                source_file.display(),
+            ),
         )
     })?;
     let mut archive = Archive::new(GzDecoder::new(source));
     archive.unpack(destination).map_err(|e| {
         ReleaseArtifactsError::ArchiveError(
             e,
-            format!("during extract_archive archive.unpack({destination:?})"),
+            format!(
+                "during extract_archive archive.unpack({})",
+                destination.display(),
+            ),
         )
     })
 }

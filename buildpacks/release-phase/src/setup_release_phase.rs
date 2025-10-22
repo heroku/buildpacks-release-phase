@@ -51,7 +51,7 @@ pub(crate) fn setup_release_phase(
         .map_err(ReleasePhaseBuildpackError::CannotInstallCommandExecutor)?;
 
     let main_exec = exec_destination.join("exec-release-commands");
-    log_info(format!("  {main_exec:?}"));
+    log_info(format!("  {}", main_exec.display()));
     fs::copy(
         additional_buildpack_binary_path!("exec-release-commands"),
         main_exec,
@@ -60,7 +60,7 @@ pub(crate) fn setup_release_phase(
 
     if commands_config.release_build.is_some() {
         let save_exec = exec_destination.join("save-release-artifacts");
-        log_info(format!("  {save_exec:?}"));
+        log_info(format!("  {}", save_exec.display()));
         fs::copy(
             additional_buildpack_binary_path!("save-release-artifacts"),
             save_exec,
@@ -69,7 +69,7 @@ pub(crate) fn setup_release_phase(
 
         let web_exec_destination = release_phase_layer.path().join("exec.d/web");
         let load_exec = web_exec_destination.join("load-release-artifacts");
-        log_info(format!("  {load_exec:?}"));
+        log_info(format!("  {}", load_exec.display()));
         fs::create_dir_all(&web_exec_destination)
             .map_err(ReleasePhaseBuildpackError::CannotCreatWebExecD)?;
         fs::copy(
