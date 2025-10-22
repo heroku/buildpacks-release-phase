@@ -121,7 +121,7 @@ pub fn generate_commands_config(
         toml_select_value(vec!["com", "heroku", "phase", "release"], project_config).cloned()
     {
         project_commands.insert("release".to_string(), release_config);
-    };
+    }
     if let Some(release_build_config) = toml_select_value(
         vec!["com", "heroku", "phase", "release-build"],
         project_config,
@@ -129,7 +129,7 @@ pub fn generate_commands_config(
     .cloned()
     {
         project_commands.insert("release-build".to_string(), release_build_config);
-    };
+    }
 
     // Create main command config from project
     let mut commands = project_commands

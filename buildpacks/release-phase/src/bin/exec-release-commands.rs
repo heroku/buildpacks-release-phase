@@ -57,7 +57,7 @@ fn exec_release_sequence(commands_toml_path: &Path) -> Result<(), release_comman
                 status.code().expect("status code to exist")
             )));
         }
-    };
+    }
 
     if let Some(release_config) = config.release {
         for config in &release_config {
@@ -80,7 +80,7 @@ fn exec_release_sequence(commands_toml_path: &Path) -> Result<(), release_comman
                 )));
             }
         }
-    };
+    }
 
     Ok(())
 }
